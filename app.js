@@ -11,7 +11,20 @@ const PASS_RATE = CFG.passRate;
 const PASS_PCT = Math.round(PASS_RATE * 100);
 const SECONDS_PER_QUESTION = CFG.secondsPerQuestion;
 const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];   // angezeigte Buchstaben je Position; Fragen haben 4 (klassisch) bis 6 Optionen (Zuordnung)
-const SOURCE_NOTE = CFG.sourceNote;
+/* Texte kommen aus i18n.js (t(), getLang() …); config.js führt für Texte nur Schlüssel (siehe dort). Anzeige-Hilfen: */
+const cfgT = k => k ? t(k) : '';                      // Konfig-Feld (Schlüssel) → Text in der aktuellen Sprache
+const appName = () => t(CFG.appTitle);
+const sourceNote = () => t(CFG.sourceNote);
+const nounOf = s => t(s.mode === 'exam' ? 'noun.exam' : 'noun.practice');   // „Prüfung“ / „Übung“
+/* Frage in der aktuellen Sprache: optionales Feld q.en = { question, opts:{A..}, expl:{A..}, items?, scenario?, groupIntro?, rationale? }.
+   Fehlt es (oder einzelne Teile), gilt der deutsche Text (Rückfall). Der Katalog selbst bleibt unverändert. */
+const _enCache = new WeakMap();
+function L(q){
+  if(getLang() !== 'en' || !q.en) return q;
+  let v = _enCache.get(q);
+  if(!v){ v = { ...q, ...q.en, opts: { ...q.opts, ...(q.en.opts || {}) }, expl: { ...q.expl, ...(q.en.expl || {}) } }; _enCache.set(q, v); }
+  return v;
+}
 /* Feedback per Teams-Direktlink (config.feedbackTeams); Hinweis-Banner auf der Startseite ist wegklickbar, die Wahl wird gemerkt ({Präfix}hint) */
 const feedbackUrl = msg => CFG.feedbackTeams ? `https://teams.microsoft.com/l/chat/0/0?users=${encodeURI(CFG.feedbackTeams)}${msg ? '&message=' + encodeURIComponent(msg) : ''}` : '';
 const HINT_KEY = (CFG.storagePrefix || '') + 'hint';
@@ -28,12 +41,9 @@ const DEFAULT_SETTINGS = {
   trainingOpts: { sim: false, source: 'all', topics: [], exams: [] },  // Trainieren: immer gemischt; Quelle siehe SOURCES; topics/exams leer = alle
 };
 /* Fragenquellen im Training (Fehler = zuletzt falsch beantwortet, Markiert = beim letzten Vorkommen markiert) */
-const SOURCES = [
-  { id: 'all',     label: 'Alle Fragen',       title: 'Training' },
-  { id: 'errors',  label: 'Fehlerfragen',      title: 'Fehlertraining' },
-  { id: 'flagged', label: 'Markierte Fragen',  title: 'Markierte Fragen' },
-  { id: 'both',    label: 'Fehler + markierte', title: 'Fehler + markierte Fragen' },
-];
+const SOURCES = [{ id: 'all' }, { id: 'errors' }, { id: 'flagged' }, { id: 'both' }];   // Beschriftungen: Schlüssel src.<id>.label/.title/.short
+const srcLabel = x => t('src.' + x.id + '.label');
+const srcTitle = (x, lang) => t('src.' + x.id + '.title', null, lang);
 function loadSettings(){
   try {
     const s = JSON.parse(localStorage.getItem(CFG.storagePrefix + 'settings') || '{}');
@@ -91,7 +101,7 @@ const passMark = n => Math.ceil(n * PASS_RATE);
    Antworten werden intern über feste Schlüssel (A–D der Katalogfrage) gespeichert.
    Angezeigt wird ein Buchstabe je Position: item.perm[i] ist der Schlüssel, der an Position LETTERS[i] steht. */
 const keysOf = q => Object.keys(q.opts).sort();               // Optionsschlüssel der Katalogfrage (A–D bzw. A–F)
-const hasExpl = q => keysOf(q).every(k => q.expl[k]);          // Begründung zu jeder Option vorhanden
+const hasExpl = q => { const v = L(q); return keysOf(q).every(k => v.expl[k]); };          // Begründung zu jeder Option vorhanden (in der aktuellen Sprache, sonst deutsch)
 const rightKeys = q => Array.isArray(q.answer) ? q.answer : [q.answer];
 const isRight = (q, key) => !!key && rightKeys(q).includes(key);
 const shown = (item, key) => LETTERS[item.perm.indexOf(key)];
@@ -99,13 +109,15 @@ const shown = (item, key) => LETTERS[item.perm.indexOf(key)];
    ersetzt sein, z. B. Musterprüfung 2 am 27.10.2026) – sonst Originalreihenfolge. Ebenso nur Antworten mit gültigem Schlüssel. */
 const fitPerm = (q, perm) => { const k = keysOf(q); return perm && [...perm].sort().join('') === [...k].sort().join('') ? perm.split('') : k; };
 const fitAns = (q, a) => a && keysOf(q).includes(a) ? a : null;
-const rightLabel = item => rightKeys(item.q).map(k => shown(item, k)).sort().join(' oder ');
-const rightText = item => rightKeys(item.q).map(k => `${shown(item, k)} – ${esc(item.q.opts[k])}`).join(' / ');
+const rightLabel = item => rightKeys(item.q).map(k => shown(item, k)).sort().join(t('join.or'));
+const rightText = item => rightKeys(item.q).map(k => `${shown(item, k)} – ${esc(L(item.q).opts[k])}`).join(' / ');
 const originNo = (q, code) => { const o = q.origin.find(o => o.startsWith(code + '-')); return o ? Number(o.split('-')[1]) : 0; };
 /* Zuordnungsblöcke (Feld group): gemeinsame Einleitung + Optionsliste, die Einleitung nennt die Buchstaben („A–F“).
    Daher werden ihre Optionen nie gemischt und die Teilfragen eines Blocks bleiben immer zusammen und in Reihenfolge. */
-const qLabel = q => q.group ? `Zuordnung: ${q.question}` : q.question;
+const qLabel = q => q.group ? t('group.label', { q: L(q).question }) : L(q).question;
 const groupPos = q => GROUPS[q.group].indexOf(q) + 1;
+/* Fokus-Hinweis (Fehler-/Markiert-Training) ist deutsch gespeichert; Anzeige in der aktuellen Sprache */
+const focusLabel = f => String(f).split(' · ').map(x => ({ 'zuletzt falsch': 'focus.wrong', 'markiert': 'focus.flagged' }[x])).map((k, i, a) => k ? t(k) : String(f).split(' · ')[i]).join(' · ');
 /* Fragen zu „Einheiten“ bündeln: ein Block = eine Einheit (alle Teilfragen), sonst jede Frage einzeln */
 function unitsFrom(questions){
   const seen = new Set(), units = [];
@@ -146,7 +158,7 @@ function loadCatalog(){
       CATALOG = data; BY_ID = Object.fromEntries(data.map(q => [q.id, q]));
       GROUPS = {};
       data.filter(q => q.group).forEach(q => (GROUPS[q.group] ||= []).push(q));
-      Object.values(GROUPS).forEach(g => g.sort((a, b) => a.origin[0].localeCompare(b.origin[0], 'de', { numeric: true })));
+      Object.values(GROUPS).forEach(g => g.sort((a, b) => a.origin[0].localeCompare(b.origin[0], 'de', { numeric: true })));   // technische Sortierung, sprachunabhängig
       state.loading = false;
       const saved = loadCurrent();                          // unterbrochener Durchlauf (Neuladen, Tab geschlossen …)?
       if(saved) state.modal = { type: 'restore', saved };
@@ -154,9 +166,7 @@ function loadCatalog(){
     })
     .catch(err => {
       state.loading = false;
-      state.loadError = location.protocol === 'file:'
-        ? 'Die Fragen können nicht direkt aus dem Dateisystem geladen werden. Bitte die App über einen Webserver öffnen (siehe README).'
-        : `Der Fragenkatalog konnte nicht geladen werden (${err.message}). Bitte die Seite neu laden.`;
+      state.loadError = location.protocol === 'file:' ? { key: 'load.errFile' } : { key: 'load.errFetch', vars: { msg: err.message } };   // Schlüssel statt Text: folgt der Sprache
       render();
     });
   (pre ? Promise.resolve(pre.szenario) : fetch('data/szenario.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null))
@@ -179,7 +189,7 @@ function newSession(){
         const perm = shuffle && !q.group ? shuffled(keysOf(q)) : (q.optOrder?.[own] || keysOf(q).join('')).split('');
         return { q, perm, origNo: originNo(q, code) };
       });
-    title = examOf(code).title;
+    title = t(examOf(code).title, null, 'de');     // gespeichert deutsch (siehe oben)
   } else {
     sim = settings.trainingOpts.sim; shuffle = true;
     const src = SOURCES.find(x => x.id === settings.trainingOpts.source) || SOURCES[0];
@@ -187,9 +197,9 @@ function newSession(){
     // Blöcke nur komplett (jeder Block gehört ganz zu einem Thema); bei Fehler-/Markiert-Training wird die betroffene Teilfrage gekennzeichnet
     items = pickUnits(unitsFrom(pool), wantedCount()).flat().map(q => ({
       q, perm: q.group ? keysOf(q) : shuffled(keysOf(q)),
-      focus: src.id !== 'all' && q.group && inPool.has(q.id) ? [st.wrong[q.id] && 'zuletzt falsch', st.flagged[q.id] && 'markiert'].filter(Boolean).join(' · ') : '',
+      focus: src.id !== 'all' && q.group && inPool.has(q.id) ? [st.wrong[q.id] && 'zuletzt falsch', st.flagged[q.id] && 'markiert'].filter(Boolean).join(' · ') : '',   // gespeichert deutsch (Format unverändert), angezeigt über focusLabel()
     }));
-    title = `${src.title}${filterTitle(chosenTopics(), chosenExams())} · ${items.length} Frage${items.length === 1 ? '' : 'n'}`;
+    title = trainingTitle(src, chosenTopics(), chosenExams(), items.length, 'de');   // gespeichert immer deutsch (Verlauf/Sicherung unverändert), angezeigt über sessionTitle()
   }
   return { mode: settings.mode, exam: settings.mode === 'exam' ? settings.exam : null, title, sim, shuffle, items,
            answers: {}, flags: new Set(), elapsed: 0,
@@ -203,10 +213,13 @@ function newSession(){
    erhalten bleiben. Desktop: Seitenleiste, der Inhalt rückt nach links; Handy (≤ 900 px): Overlay über der Frage. */
 const scenPanel = document.getElementById('scenPanel');
 const isDesktop = () => window.matchMedia('(min-width: 901px)').matches;
+/* Szenario in der aktuellen Sprache: optionales Feld SCENARIO.en (gleiche Form wie das Original), sonst deutsch */
+const scen = () => getLang() === 'en' && SCENARIO.en ? { ...SCENARIO, ...SCENARIO.en } : SCENARIO;
 function renderScenario(){
   if(!SCENARIO) return;
-  scenPanel.innerHTML = `<div class="scen-head"><b>${esc(SCENARIO.title)}</b><button class="btn small" id="scenClose">Schließen ✕</button></div>
-    <div class="scen-body">${scenarioBody(SCENARIO)}<p class="time-note">${esc(SCENARIO.source)}</p></div>`;
+  const sc = scen();
+  scenPanel.innerHTML = `<div class="scen-head"><b>${esc(sc.title)}</b><button class="btn small" id="scenClose">${t('scen.close')}</button></div>
+    <div class="scen-body">${scenarioBody(sc)}<p class="time-note">${esc(sc.source)}</p></div>`;
   document.getElementById('scenClose').onclick = () => setScen(false);
 }
 function setScen(open, remember = true){
@@ -216,7 +229,7 @@ function setScen(open, remember = true){
   if(remember && isDesktop()){ settings.scenDesk = state.scenOpen; saveSettings(); }
   document.querySelectorAll('[data-scen]').forEach(b => {
     b.classList.toggle('active', state.scenOpen); b.setAttribute('aria-expanded', state.scenOpen);
-    b.textContent = state.scenOpen ? 'Szenario ausblenden' : 'Szenario';
+    b.textContent = t(state.scenOpen ? 'scen.hide' : 'scen.show');
   });
   if(state.scenOpen && !isDesktop()) scenPanel.focus();
 }
@@ -240,19 +253,19 @@ function showTimer(){
   const slow = done && ratio > 1;
   const fill = pos < 50 ? `left:${pos}%;right:50%` : `left:50%;right:${100 - pos}%`;
   const target = fmt(Math.round(SECONDS_PER_QUESTION));
-  const pace = `<div class="tbar pace${slow ? ' slow' : ''}" title="Prüfungstempo: ${target} pro Frage (${CFG.examInfo}). Punkt links = schneller, rechts = langsamer."
-      aria-label="Dauer ${fmt(s.elapsed)} Minuten${done ? `, durchschnittlich ${fmt(Math.round(avg))} pro Frage, Prüfungstempo ${target}` : ''}">
-      <span class="pv">Dauer <b>${fmt(s.elapsed)}</b></span>
+  const pace = `<div class="tbar pace${slow ? ' slow' : ''}" title="${esc(t('timer.paceTitle', { target, info: cfgT(CFG.examInfo) }))}"
+      aria-label="${esc(t('timer.paceAria', { time: fmt(s.elapsed) }) + (done ? t('timer.paceAriaAvg', { avg: fmt(Math.round(avg)), target }) : ''))}">
+      <span class="pv">${t('timer.duration')} <b>${fmt(s.elapsed)}</b></span>
       <span class="pace-m" aria-hidden="true">${done ? `<i class="pace-f" style="${fill}"></i><i class="pace-d" style="left:${pos}%"></i>` : ''}</span>
-      <span class="pv pv-r">Ø <b>${done ? fmt(Math.round(avg)) : '–'}</b><span class="pf"> pro Frage</span></span></div>`;
+      <span class="pv pv-r">Ø <b>${done ? fmt(Math.round(avg)) : '–'}</b><span class="pf"> ${t('timer.perQuestion')}</span></span></div>`;
   let count = '';
   if(countdown){
     // Simulation: Restzeit-Leiste füllt sich mit der verstrichenen Zeit; Text mittig, zweimal gesetzt
     // (normal auf dem leeren Teil, Kontrastfarbe auf dem gefüllten Teil – per clip-path exakt an der Füllkante getrennt)
     const left = s.limit - s.elapsed, warn = left <= Math.min(300, s.limit / 5);
     const pct = Math.min(100, s.elapsed / s.limit * 100).toFixed(2);
-    const label = `Restzeit <b>${fmt(left)}</b>`;
-    count = `<div class="tbar count${warn ? ' warn' : ''}" role="timer" aria-label="Restzeit ${fmt(left)} Minuten">
+    const label = `${t('timer.remaining')} <b>${fmt(left)}</b>`;
+    count = `<div class="tbar count${warn ? ' warn' : ''}" role="timer" aria-label="${esc(t('timer.remainingAria', { time: fmt(left) }))}">
       <i class="tb-fill" style="width:${pct}%"></i><span class="tb-lbl" aria-hidden="true">${label}</span><span class="tb-lbl on" style="clip-path:inset(0 ${100 - pct}% 0 0)" aria-hidden="true">${label}</span></div>`;
   }
   timer.innerHTML = pace + count;
@@ -422,15 +435,33 @@ const topicList = () => [...new Set(CATALOG.map(q => q.topic).filter(Boolean))];
 const chosenTopics = () => settings.trainingOpts.topics.filter(t => topicList().includes(t));
 const byTopics = (qs, topics = chosenTopics()) => topics.length ? qs.filter(q => topics.includes(q.topic)) : qs;
 const wantedCount = () => settings.count || Infinity;     // 0 = „Alle“
-const countLabel = (v, max) => v >= max ? `Alle ${CATALOG.length} Fragen` : `${v} Fragen`;
-const topicTitle = topics => !topics.length ? '' : topics.length === 1 ? ` · ${topics[0].replace(/^Practice: /, '')}` : ` · ${topics.length} Themen`;
+const countLabel = (v, max) => v >= max ? t('count.all', { n: CATALOG.length }) : t('count.n', { n: v });
+const topicShort = tp => topicLabel(tp.replace(/^Practice: /, ''));
+const topicTitle = (topics, lang) => !topics.length ? '' : topics.length === 1 ? ` · ${topicShort(topics[0])}` : ` · ${t('filter.nTopics', { n: topics.length }, lang)}`;
 /* Fragequellen = Prüfungen aus config.js (Musterprüfungen, später Mocks); leer = alle. Eine Frage zählt zu jeder Prüfung in origin. */
 const inExam = (q, code) => q.origin.some(o => o.startsWith(code + '-'));
 const chosenExams = () => settings.trainingOpts.exams.filter(c => EXAMS.some(e => e.code === c));
 const byExams = (qs, exams = chosenExams()) => exams.length ? qs.filter(q => exams.some(c => inExam(q, c))) : qs;
 const narrow = (qs, topics = chosenTopics(), exams = chosenExams()) => byExams(byTopics(qs, topics), exams);
-const examTitle = exams => !exams.length ? '' : exams.length === 1 ? ` · ${examOf(exams[0]).title}` : ` · ${exams.length} Prüfungen`;
-const filterTitle = (topics, exams) => examTitle(exams) + topicTitle(topics);
+const examNameOf = (code, lang) => t(examOf(code).title, null, lang);
+const examTitle = (exams, lang) => !exams.length ? '' : exams.length === 1 ? ` · ${examNameOf(exams[0], lang)}` : ` · ${t('filter.nExams', { n: exams.length }, lang)}`;
+const filterTitle = (topics, exams, lang) => examTitle(exams, lang) + topicTitle(topics, lang);
+/* Titel einer Trainingseinheit: „Training · Prüfung · Thema · 20 Fragen“ */
+const trainingTitle = (src, topics, exams, n, lang) => `${srcTitle(src, lang)}${filterTitle(topics, exams, lang)} · ${t('n.question', { n }, lang)}`;
+/* Gespeicherte Titel sind deutsch (Verlauf, Sicherung, Berichte bleiben unverändert). Anzeige: Prüfungen über die Konfiguration,
+   Trainingstitel (auch ältere Einträge) über Zerlegung des deutschen Titels; unbekannte Titel bleiben unverändert. */
+function sessionTitle(s){
+  if(getLang() === 'de') return s.title;
+  if(s.mode === 'exam' && s.exam && examOf(s.exam)) return t(examOf(s.exam).title);
+  const parts = String(s.title).split(' · '), last = /^(\d+) Fragen?$/.exec(parts[parts.length - 1] || '');
+  const src = SOURCES.find(x => srcTitle(x, 'de') === parts[0]);
+  if(!src || !last || parts.length < 2) return s.title;
+  const mid = parts.slice(1, -1).map(p => {
+    const ex = EXAMS.find(e => t(e.title, null, 'de') === p), nE = /^(\d+) Prüfungen$/.exec(p), nT = /^(\d+) Themen$/.exec(p);
+    return ex ? t(ex.title) : nE ? t('filter.nExams', { n: +nE[1] }) : nT ? t('filter.nTopics', { n: +nT[1] }) : topicLabel(p);
+  });
+  return [srcTitle(src), ...mid, t('n.question', { n: +last[1] })].join(' · ');
+}
 function review(pos){ state.view = 'exam'; state.reviewMode = true; state.pos = pos; render(); window.scrollTo(0, 0); }
 function score(){ const s = state.session; return s.items.filter(it => isRight(it.q, s.answers[it.q.id])).length; }
 
@@ -438,11 +469,11 @@ function score(){ const s = state.session; return s.items.filter(it => isRight(i
    erkennt man an der Farbe (und am Text „Richtig“ bzw. „Deine Antwort“), nicht an der Position.
    Falsche Optionen mit identischem Text (z. B. Zuordnungsblöcke: nur Literatur-Verweis wie „Siehe 5.5“) werden zusammengefasst. */
 function explRows(item, chosen){
-  const q = item.q, ok = isRight(q, chosen), rows = [];
+  const q = item.q, Q = L(q), ok = isRight(q, chosen), rows = [];
   [...item.perm].forEach(key => {
     const right = isRight(q, key), mine = key === chosen && !ok;
-    const same = !right && !mine && rows.find(r => !r.right && !r.mine && r.text === q.expl[key]);
-    if(same) same.keys.push(key); else rows.push({ keys: [key], right, mine, text: q.expl[key] });
+    const same = !right && !mine && rows.find(r => !r.right && !r.mine && r.text === Q.expl[key]);
+    if(same) same.keys.push(key); else rows.push({ keys: [key], right, mine, text: Q.expl[key] });
   });
   return rows.map(r => ({ ...r, letters: r.keys.map(k => shown(item, k)).sort() }));
 }
@@ -453,7 +484,7 @@ const scenarioBody = sc => `${sc.intro.map(b => `${b.heading ? `<h4>${esc(b.head
 /* ---------- Bericht zum Herunterladen (offline lesbar) ----------
    Eine einzelne HTML-Datei ohne externe Abhängigkeiten: öffnet in jedem Browser, druckbar / als PDF speicherbar.
    Reihenfolge: zuerst falsch und nicht beantwortete Fragen (aufgeklappt), dann richtige (zugeklappt). */
-const fmtDate = iso => new Date(iso).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+const fmtDate = iso => new Date(iso).toLocaleString(getLocale(), { dateStyle: 'medium', timeStyle: 'short' });
 function download(name, content, type){
   const url = URL.createObjectURL(new Blob([content], { type }));
   const a = document.createElement('a'); a.href = url; a.download = name;
@@ -463,35 +494,35 @@ function download(name, content, type){
 function reportFileName(s){
   const d = new Date(s.date || Date.now());
   const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-  const what = (s.mode === 'exam' ? examOf(s.exam).title : s.title).replace(/[^\wäöüÄÖÜß]+/g, '-').replace(/-+$/, '');
+  const what = (s.mode === 'exam' ? t(examOf(s.exam).title, null, 'de') : s.title).replace(/[^\wäöüÄÖÜß]+/g, '-').replace(/-+$/, '');
   return `${CFG.reportPrefix}-Bericht_${what}_${stamp}.html`;
 }
 function reportQuestion(s, it, i){
-  const q = it.q, chosen = s.answers[q.id], ok = isRight(q, chosen);
+  const q = it.q, Q = L(q), chosen = s.answers[q.id], ok = isRight(q, chosen);
   const withExpl = hasExpl(q);
   // Zusammengefasste Begründungen (identischer Text bei mehreren falschen Optionen) nur einmal unter der Liste
   const rows = withExpl ? explRows(it, chosen) : [], shared = rows.filter(r => r.keys.length > 1);
   const opts = it.perm.map((key, k) => {
     const right = isRight(q, key), mine = key === chosen;
     const cls = right ? 'right' : mine ? 'wrong' : '';
-    const tag = right && mine ? 'Richtig · deine Antwort' : right ? 'Richtige Antwort' : mine ? 'Deine Antwort' : '';
+    const tag = right && mine ? t('opt.rightMine') : right ? t('opt.right') : mine ? t('opt.mine') : '';
     const own = withExpl && !shared.some(r => r.keys.includes(key));
-    return `<li class="${cls}"><b>${right ? ICON_CHECK : mine ? ICON_X : LETTERS[k]}</b><div><span class="ot">${esc(q.opts[key])}</span>${tag ? `<i>${tag}</i>` : ''}${own ? `<em>${esc(q.expl[key])}</em>` : ''}</div></li>`;
+    return `<li class="${cls}"><b>${right ? ICON_CHECK : mine ? ICON_X : LETTERS[k]}</b><div><span class="ot">${esc(Q.opts[key])}</span>${tag ? `<i>${tag}</i>` : ''}${own ? `<em>${esc(Q.expl[key])}</em>` : ''}</div></li>`;
   }).join('');
-  const sharedHtml = shared.map(r => `<p class="sh"><b>Übrige Optionen ${r.letters.join(', ')}: falsch.</b> ${esc(r.text)}</p>`).join('');
+  const sharedHtml = shared.map(r => `<p class="sh"><b>${t('rep.shared', { letters: r.letters.join(', ') })}</b> ${esc(r.text)}</p>`).join('');
   const st = ok ? 'ok' : chosen ? 'bad' : 'open';
-  const status = ok ? 'Richtig' : chosen ? 'Falsch' : 'Nicht beantwortet';
+  const status = t(ok ? 'verdict.right' : chosen ? 'verdict.wrong' : 'rep.statusOpen');
   return `<details class="q ${st}" ${ok ? '' : 'open'}>
-  <summary><span class="nr">${i + 1}</span><span class="qt">${esc(qLabel(q))}</span><span class="tp">${esc(q.topic || '')}</span><span class="st">${status}</span></summary>
+  <summary><span class="nr">${i + 1}</span><span class="qt">${esc(qLabel(q))}</span><span class="tp">${esc(q.topic ? topicLabel(q.topic) : '')}</span><span class="st">${status}</span></summary>
   <div class="qb">
-  ${q.group ? `<p class="sc">${esc(q.groupIntro)}</p><p class="gp">Zuordnung · Aussage ${groupPos(q)} von ${GROUPS[q.group].length}</p>` : ''}
-  ${q.scenario ? `<p class="sc">${esc(q.scenario)}</p>` : ''}
-  <p class="qq">${esc(q.question)}</p>
-  ${q.items.length ? `<ol class="it">${q.items.map(t => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
+  ${q.group ? `<p class="sc">${esc(Q.groupIntro)}</p><p class="gp">${t('group.pos', { i: groupPos(q), n: GROUPS[q.group].length })}</p>` : ''}
+  ${Q.scenario ? `<p class="sc">${esc(Q.scenario)}</p>` : ''}
+  <p class="qq">${esc(Q.question)}</p>
+  ${Q.items.length ? `<ol class="it">${Q.items.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
   <ul class="op">${opts}</ul>${sharedHtml}
-  ${!withExpl && q.rationale ? `<div class="ra"><b>Begründung</b><p>${esc(q.rationale)}</p></div>` : ''}
-  ${!withExpl && !q.rationale ? `<div class="ra"><b>Lösung</b><p>Richtig ist ${rightLabel(it)}. Für diese Frage liegt keine Begründung vor.</p></div>` : ''}
-  <p class="meta">${q.topic ? `${esc(q.topic)}${!q.ref && CFG.topicNoteShort ? ` (${esc(CFG.topicNoteShort)})` : ''} · ` : ''}${q.ref ? `${esc(CFG.refLabel || 'Lehrplan')} ${esc(q.ref)} · ` : ''}Herkunft ${esc(q.origin.join(', '))} · ${q.id}</p>
+  ${!withExpl && Q.rationale ? `<div class="ra"><b>${t('fb.rationale')}</b><p>${esc(Q.rationale)}</p></div>` : ''}
+  ${!withExpl && !Q.rationale ? `<div class="ra"><b>${t('fb.solution')}</b><p>${t('rep.noRationale', { right: rightLabel(it) })}</p></div>` : ''}
+  <p class="meta">${q.topic ? `${esc(topicLabel(q.topic))}${!q.ref && CFG.topicNoteShort ? ` (${esc(cfgT(CFG.topicNoteShort))})` : ''} · ` : ''}${q.ref ? `${esc(cfgT(CFG.refLabel))} ${esc(refLabel(q.ref))} · ` : ''}${t('meta.origin')} ${esc(q.origin.join(', '))} · ${q.id}</p>
   </div>
 </details>`;
 }
@@ -505,13 +536,14 @@ function buildReport(s){
   const topics = {};
   s.items.forEach(it => { if(!it.q.topic) return; const t = topics[it.q.topic] ||= {c: 0, n: 0}; t.n++; if(isRight(it.q, s.answers[it.q.id])) t.c++; });
   // Themenbereiche wie in der App: schwächster zuerst, Balken rosé unter der Bestehensgrenze
-  const topicRows = Object.entries(topics).map(([t, v]) => ({ t, ...v, p: Math.round(v.c / v.n * 100) })).sort((a, b) => a.p - b.p || a.t.localeCompare(b.t, 'de'));
-  const timeVal = fmt(s.elapsed), timeSub = s.limit ? `von ${fmt(s.limit)} min${s.timeout ? ' · Zeit abgelaufen' : ''}` : 'min · Stoppuhr';
-  const kind = [s.mode === 'exam' ? 'Reale Prüfung' : 'Training', s.sim ? 'Prüfungssimulation' : '', s.shuffle ? 'gemischt' : ''].filter(Boolean).join(' · ');
+  const topicRows = Object.entries(topics).map(([tp, v]) => ({ t: topicLabel(tp), ...v, p: Math.round(v.c / v.n * 100) })).sort((a, b) => a.p - b.p || a.t.localeCompare(b.t, getLocale()));
+  const timeVal = fmt(s.elapsed), timeSub = s.limit ? t('rep.timeOf', { limit: fmt(s.limit) }) + (s.timeout ? t('rep.timeUp') : '') : t('rep.stopwatch');
+  const kind = [t(s.mode === 'exam' ? 'mode.exam' : 'mode.training'), s.sim ? t('badge.sim') : '', s.shuffle ? t('kind.shuffled') : ''].filter(Boolean).join(' · ');
+  const title = sessionTitle(s);
   const R = 52, C = 2 * Math.PI * R;                       // Ergebnis-Ring (SVG)
   return `<!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(CFG.appTitle)} · Bericht · ${esc(s.title)}</title>
+<html lang="${getLang()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(t('rep.docTitle', { app: appName(), title }))}</title>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
 /* Farben wie in der App (DevOps Foundation): Blau = Aktion, Grün = richtig, Orange-Rot = falsch (jeweils zusätzlich mit Symbol/Text) */
@@ -611,39 +643,39 @@ ul.op li.right em{color:var(--okink);opacity:.85}ul.op li.wrong em{color:var(--b
 </style>
 <script>addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>d.open=true))<\/script>
 </head><body>
-<header class="rh">${LOGO_DATA ? `<img class="lg-l" src="${LOGO_DATA}" alt="${esc(CFG.logoAlt || CFG.appTitle)}">${LOGO_DARK_DATA ? `<img class="lg-d" src="${LOGO_DARK_DATA}" alt="" aria-hidden="true">` : ''}` : `<b>${esc(CFG.brand)}</b>`}${CFG.brandWord ? `<span class="bw">${esc(CFG.brandWord)}</span>` : ''}<span class="doc">Prüfungsbericht</span></header>
-<p class="eyebrow">Auswertung · ${esc(kind)}</p>
-<h1>${esc(s.title)}</h1>
+<header class="rh">${LOGO_DATA ? `<img class="lg-l" src="${LOGO_DATA}" alt="${esc(CFG.logoAlt || appName())}">${LOGO_DARK_DATA ? `<img class="lg-d" src="${LOGO_DARK_DATA}" alt="" aria-hidden="true">` : ''}` : `<b>${esc(CFG.brand)}</b>`}${CFG.brandWord ? `<span class="bw">${esc(CFG.brandWord)}</span>` : ''}<span class="doc">${t('rep.docLabel')}</span></header>
+<p class="eyebrow">${t('rep.eyebrow', { kind: esc(kind) })}</p>
+<h1>${esc(title)}</h1>
 <p class="sub">${fmtDate(s.date || new Date().toISOString())}</p>
 <section class="card hero">
-  <svg class="ring" viewBox="0 0 132 132" role="img" aria-label="${pct} Prozent richtig">
+  <svg class="ring" viewBox="0 0 132 132" role="img" aria-label="${esc(t('rep.ringAria', { pct }))}">
     <circle class="tr" cx="66" cy="66" r="${R}" fill="none" stroke-width="12"/>
     <circle class="fg" cx="66" cy="66" r="${R}" fill="none" stroke-width="12" stroke-linecap="round" stroke-dasharray="${(C * sc / total).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 66 66)"/>
     <text x="66" y="66" text-anchor="middle" font-size="28" font-weight="700">${pct} %</text>
     <text x="66" y="88" text-anchor="middle" font-size="13" font-weight="500" opacity=".65">${sc} / ${total}</text>
   </svg>
   <div class="res">
-    <span class="pill ${passed ? 'pass' : 'fail'}">${passed ? ICON_CHECK : ICON_X}${passed ? 'Bestanden' : 'Nicht bestanden'}</span>
-    <p><b>${sc} von ${total}</b> Fragen richtig – zum Bestehen nötig: <b>${pass}</b> (${PASS_PCT} %).</p>
+    <span class="pill ${passed ? 'pass' : 'fail'}">${passed ? ICON_CHECK : ICON_X}${t(passed ? 'res.passed' : 'res.failed')}</span>
+    <p>${t('rep.summary', { sc, total, pass, pct: PASS_PCT })}</p>
     <div class="pbar"><i style="width:${pct}%"></i><u style="left:${PASS_PCT}%"></u></div>
-    <div class="pbar-l"><span style="left:0">0 %</span><span class="m" style="left:${PASS_PCT}%">Bestehensgrenze ${PASS_PCT} %</span><span style="right:0">100 %</span></div>
+    <div class="pbar-l"><span style="left:0">0 %</span><span class="m" style="left:${PASS_PCT}%">${t('pass.limit', { pct: PASS_PCT })}</span><span style="right:0">100 %</span></div>
   </div>
 </section>
 <div class="kpis">
-  <div class="card kpi ok"><b>${sc}</b><span>richtig</span></div>
-  <div class="card kpi bad"><b>${wrongN}</b><span>falsch</span></div>
-  <div class="card kpi open"><b>${openN}</b><span>nicht beantwortet</span></div>
+  <div class="card kpi ok"><b>${sc}</b><span>${t('kpi.right')}</span></div>
+  <div class="card kpi bad"><b>${wrongN}</b><span>${t('kpi.wrong')}</span></div>
+  <div class="card kpi open"><b>${openN}</b><span>${t('kpi.open')}</span></div>
   <div class="card kpi"><b>${timeVal}</b><span>${timeSub}</span></div>
 </div>
-${topicRows.length ? `<h2>Ergebnis nach Themenbereich</h2>
+${topicRows.length ? `<h2>${t('topics.result')}</h2>
 <section class="card topics">${topicRows.map(r => `<div class="tr-row${r.p < PASS_PCT ? ' low' : ''}"><span>${esc(r.t)}</span><div class="b"><i style="width:${r.p}%"></i></div><span class="v"><b>${r.p} %</b> · ${r.c}/${r.n}</span></div>`).join('')}</section>
-<p class="note">Sortiert vom schwächsten zum stärksten Bereich; rosé = unter der Bestehensgrenze von ${PASS_PCT} %.</p>` : ''}
-<h2>Falsch oder nicht beantwortet <small>${notOk.length} ${notOk.length === 1 ? 'Frage' : 'Fragen'}</small></h2>
-${notOk.length ? notOk.map(({it, i}) => reportQuestion(s, it, i)).join('') : '<div class="card empty">Keine – alle Fragen richtig beantwortet.</div>'}
-<h2>Richtig beantwortet <small>${okRows.length} ${okRows.length === 1 ? 'Frage' : 'Fragen'} · zum Aufklappen</small></h2>
-${okRows.length ? okRows.map(({it, i}) => reportQuestion(s, it, i)).join('') : '<div class="card empty">Noch keine.</div>'}
-${SCENARIO ? `<h2>Anhang: ${esc(SCENARIO.title)}</h2><section class="card scen">${scenarioBody(SCENARIO)}<p class="meta">${esc(SCENARIO.source)}</p></section>` : ''}
-<footer class="foot"><b>Erstellt mit dem ${esc(CFG.appTitle)}</b>${CFG.liveUrl ? ` · ${esc(CFG.liveUrl)}` : ''}<br>${esc(SOURCE_NOTE)} ${esc(CFG.trademark || '')} Nur für das persönliche Lernen. Alle Angaben ohne Gewähr.</footer>
+<p class="note">${t('rep.topicNote', { pct: PASS_PCT })}</p>` : ''}
+<h2>${t('rep.h.notok')} <small>${t('n.question', { n: notOk.length })}</small></h2>
+${notOk.length ? notOk.map(({it, i}) => reportQuestion(s, it, i)).join('') : `<div class="card empty">${t('rep.noneWrong')}</div>`}
+<h2>${t('rep.h.ok')} <small>${t('n.question', { n: okRows.length })}${t('rep.expand')}</small></h2>
+${okRows.length ? okRows.map(({it, i}) => reportQuestion(s, it, i)).join('') : `<div class="card empty">${t('rep.noneRight')}</div>`}
+${SCENARIO ? `<h2>${t('rep.appendix', { title: esc(scen().title) })}</h2><section class="card scen">${scenarioBody(scen())}<p class="meta">${esc(scen().source)}</p></section>` : ''}
+<footer class="foot"><b>${t('rep.madeWith', { app: esc(appName()) })}</b>${CFG.liveUrl ? ` · ${esc(CFG.liveUrl)}` : ''}<br>${esc(sourceNote())} ${esc(cfgT(CFG.trademark))} ${t('rep.footTail')}</footer>
 </body></html>`;
 }
 function downloadReport(s){ download(reportFileName(s), buildReport(s), 'text/html;charset=utf-8'); }
@@ -665,18 +697,19 @@ const ICON_CHART = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const ICON_HOME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>';
 function updateChrome(){
   const s = state.session;
-  footSource.textContent = SOURCE_NOTE; footTrademark.textContent = CFG.trademark || '';
-  footFeedback.innerHTML = `Alle Angaben ohne Gewähr.${feedbackUrl() ? ` <a href="${esc(feedbackUrl('Feedback zum ' + CFG.appTitle + ': '))}" target="_blank" rel="noopener">Feedback per Teams</a>.` : ''}`;
+  footSource.textContent = sourceNote(); footTrademark.textContent = cfgT(CFG.trademark); footLearn.textContent = t('foot.learn');
+  footFeedback.innerHTML = `${t('foot.disclaimer')}${feedbackUrl() ? ` <a href="${esc(feedbackUrl(t('fb.msgGeneral', { app: appName() })))}" target="_blank" rel="noopener">${t('foot.feedback')}</a>.` : ''}`;
   // Während einer laufenden Bearbeitung kein Wechsel in den Lernfortschritt (sonst ginge die Sitzung verloren)
   progressBtn.hidden = state.view === 'exam' && !state.reviewMode;
   if(state.view !== 'exam' || state.reviewMode){ if(!state.reviewMode) stopTimer(); timer.hidden = true; }
   // Im Lernfortschritt wird der Knopf zu „⌂ Zurück“ (zur Startseite), sonst „Lernfortschritt“
   const inProgress = state.view === 'progress';
-  if(progressBtn.dataset.mode !== (inProgress ? 'back' : 'progress')){
-    progressBtn.dataset.mode = inProgress ? 'back' : 'progress';
-    progressBtn.innerHTML = inProgress ? `${ICON_HOME}<span>Zurück</span>` : `${ICON_CHART}<span>Lernfortschritt</span>`;
-    progressBtn.setAttribute('aria-label', inProgress ? 'Zurück zur Startseite' : 'Lernfortschritt');
-    progressBtn.title = inProgress ? 'Zurück zur Startseite' : 'Lernfortschritt';
+  const pbKey = (inProgress ? 'back' : 'progress') + getLang();          // Sprache gehört dazu: Beschriftung folgt dem Sprachwechsel
+  if(progressBtn.dataset.mode !== pbKey){
+    progressBtn.dataset.mode = pbKey;
+    progressBtn.innerHTML = inProgress ? `${ICON_HOME}<span>${t('nav.backShort')}</span>` : `${ICON_CHART}<span>${t('nav.progress')}</span>`;
+    progressBtn.setAttribute('aria-label', t(inProgress ? 'nav.backHome' : 'nav.progress'));
+    progressBtn.title = t(inProgress ? 'nav.backHome' : 'nav.progress');
   }
   if(state.view !== 'exam' && state.scenOpen) setScen(false, false);
 }
@@ -709,21 +742,21 @@ function viewStart(){
   const ex = examOf(settings.exam);
 
   const modeCards = [
-    ['exam', 'Reale Prüfung', `${EXAMS.length > 1 ? `Eine von ${EXAMS.length} Prüfungen` : 'Die Musterprüfung'} in Originalumfang, wie in der echten Prüfung.`],
-    ['training', 'Trainieren', `Zufällige Fragen aus dem Gesamtkatalog${ready ? ` mit ${CATALOG.length} Fragen` : ''}.`],
-  ].map(([v, t, d]) => `
+    ['exam', t('mode.exam'), EXAMS.length > 1 ? t('mode.examDescMany', { n: EXAMS.length }) : t('mode.examDescOne')],
+    ['training', t('mode.train'), ready ? t('mode.trainDescN', { n: CATALOG.length }) : t('mode.trainDesc')],
+  ].map(([v, title, d]) => `
         <label class="pick mode">
           <input type="radio" name="mode" value="${v}" ${settings.mode === v ? 'checked' : ''}>
           <span class="dot" aria-hidden="true"></span>
-          <span><b>${t}</b><small>${d}</small></span>
+          <span><b>${title}</b><small>${d}</small></span>
         </label>`).join('');
 
   const examCards = EXAMS.map(e => `
         <label class="pick">
           <input type="radio" name="exam" value="${e.code}" ${e.code === settings.exam ? 'checked' : ''}>
           <span class="dot" aria-hidden="true"></span>
-          <span><b>${esc(e.title)}</b><small>${esc(e.sub)}</small>
-            <span class="badge ${e.official ? 'official' : ''}">${esc(e.badge || (e.official ? 'mit Begründungen' : 'nur Lösungen'))}</span></span>
+          <span><b>${esc(t(e.title))}</b><small>${esc(t(e.sub))}</small>
+            <span class="badge ${e.official ? 'official' : ''}">${esc(e.badge ? t(e.badge) : t(e.official ? 'exam.badgeExpl' : 'exam.badgeSolOnly'))}</span></span>
         </label>`).join('');
 
   // Schieberegler: 10er-Schritte bis zur Katalogsgröße (aufgerundet); ganz rechts = „Alle“ (gespeichert als 0)
@@ -733,112 +766,113 @@ function viewStart(){
   const countSlider = `
         <div class="cnt-slider">
           <output id="countOut" for="countRange">${countLabel(countVal, countMax)}</output>
-          <input type="range" id="countRange" min="${COUNT_STEP}" max="${countMax}" step="${COUNT_STEP}" value="${countVal}" style="--p:${countPct(countVal)}" aria-label="Anzahl der Fragen" aria-valuetext="${countLabel(countVal, countMax)}">
+          <input type="range" id="countRange" min="${COUNT_STEP}" max="${countMax}" step="${COUNT_STEP}" value="${countVal}" style="--p:${countPct(countVal)}" aria-label="${esc(t('count.aria'))}" aria-valuetext="${countLabel(countVal, countMax)}">
           <div class="cnt-ticks" aria-hidden="true">${'<i></i>'.repeat(countMax / COUNT_STEP)}</div>
-          <div class="cnt-scale" aria-hidden="true"><span>${COUNT_STEP}</span><span>Alle (${CATALOG.length})</span></div>
+          <div class="cnt-scale" aria-hidden="true"><span>${COUNT_STEP}</span><span>${t('count.scaleAll', { n: CATALOG.length })}</span></div>
         </div>`;
   // Filter-Chips: kompakte Pillen mit Zahl; jede Zeile beginnt mit „Alle“ (bei Themen/Quellen = keine Einzelauswahl)
   const chip = (type, name, value, label, count, checked, disabled) => `
           <label class="fchip"><input type="${type}" name="${name}" value="${esc(value)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span>${esc(label)}<small>${count}</small></span></label>`;
-  const SHORT = { all: 'Alle', errors: 'Fehler', flagged: 'Markiert', both: 'Fehler + markiert' };   // kurz, damit die Zeile passt
-  const sourceChips = SOURCES.map(x => chip('radio', 'source', x.id, SHORT[x.id] || x.label, poolSize[x.id], x.id === src.id, x.id !== 'all' && !poolSize[x.id] && x.id !== src.id)).join('');
-  const topicButtons = chip('checkbox', 'topicAll', 'all', 'Alle', srcByExams.length, !topicsSel.length, false) + Object.entries(topicCount).map(([t, c]) => chip('checkbox', 'topic', t, t.replace(/^Practice: /, ''), c, topicsSel.includes(t), !c && !topicsSel.includes(t))).join('');
-  const examButtons = chip('checkbox', 'qsrcAll', 'all', 'Alle', srcByTopics.length, !examsSel.length, false) + Object.entries(examCount).map(([c, k]) => chip('checkbox', 'qsrc', c, examOf(c).title, k, examsSel.includes(c), !k && !examsSel.includes(c))).join('');
+  const sourceChips = SOURCES.map(x => chip('radio', 'source', x.id, t('src.' + x.id + '.short'), poolSize[x.id], x.id === src.id, x.id !== 'all' && !poolSize[x.id] && x.id !== src.id)).join('');
+  const topicButtons = chip('checkbox', 'topicAll', 'all', t('filter.all'), srcByExams.length, !topicsSel.length, false) + Object.entries(topicCount).map(([tp, c]) => chip('checkbox', 'topic', tp, topicShort(tp), c, topicsSel.includes(tp), !c && !topicsSel.includes(tp))).join('');
+  const examButtons = chip('checkbox', 'qsrcAll', 'all', t('filter.all'), srcByTopics.length, !examsSel.length, false) + Object.entries(examCount).map(([c, k]) => chip('checkbox', 'qsrc', c, examNameOf(c), k, examsSel.includes(c), !k && !examsSel.includes(c))).join('');
   // Kurzbeschreibung aktiver Filter (für den eingeklappten Zustand)
-  const filterParts = [src.id !== 'all' ? src.label : '', examsSel.length === 1 ? examOf(examsSel[0]).title : examsSel.length ? `${examsSel.length} Prüfungen` : '',
-    topicsSel.length === 1 ? topicsSel[0].replace(/^Practice: /, '') : topicsSel.length ? `${topicsSel.length} Themen` : ''].filter(Boolean);
+  const filterParts = [src.id !== 'all' ? srcLabel(src) : '', examsSel.length === 1 ? examNameOf(examsSel[0]) : examsSel.length ? t('filter.nExams', { n: examsSel.length }) : '',
+    topicsSel.length === 1 ? topicShort(topicsSel[0]) : topicsSel.length ? t('filter.nTopics', { n: topicsSel.length }) : ''].filter(Boolean);
   const filterOpen = state.filterOpen ?? filterParts.length > 0;
-  const frow = (title, help, body) => `<div class="frow"><div class="frow-head">${title}${tip('tip' + title.replace(/\W/g, ''), title, help)}</div><div class="fchips">${body}</div></div>`;
+  const frow = (id, title, help, body) => `<div class="frow"><div class="frow-head">${title}${tip('tip' + id, title, help)}</div><div class="fchips">${body}</div></div>`;
 
   const topics = {};
   if(isExam) CATALOG.filter(q => q.origin.some(o => o.startsWith(settings.exam + '-')))
     .forEach(q => { if(q.topic) topics[q.topic] = (topics[q.topic] || 0) + 1; });
 
-  const timeText = opts.sim ? `${minutesFor(n)} min` : 'Stoppuhr';
+  const timeText = opts.sim ? t('time.min', { n: minutesFor(n) }) : t('time.stopwatch');
   // Fehler-/Markiert-Training: Teilfragen von Zuordnungsblöcken ziehen ihren ganzen Block mit
-  const topicPhrase = !topicsSel.length ? '' : topicsSel.length === 1 ? ` im Themenbereich „${esc(topicsSel[0])}“` : ` in ${topicsSel.length} Themenbereichen`;
-  const examName = !examsSel.length ? '' : examsSel.length === 1 ? examOf(examsSel[0]).title : `${examsSel.length} Prüfungen`;
-  const plusBlocks = (examName ? ` in ${esc(examName)}` : '') + topicPhrase + (ready && src.id !== 'all' && unitsFrom(narrow(srcPool, topicsSel, examsSel)).flat().length > poolSize[src.id] ? ', ergänzt um die übrigen Teilfragen ihrer Zuordnungsblöcke' : '');
+  const topicPhrase = !topicsSel.length ? '' : topicsSel.length === 1 ? t('phrase.topic1', { name: esc(topicLabel(topicsSel[0])) }) : t('phrase.topicN', { n: topicsSel.length });
+  const examName = !examsSel.length ? '' : examsSel.length === 1 ? examNameOf(examsSel[0]) : t('filter.nExams', { n: examsSel.length });
+  const plusBlocks = (examName ? t('phrase.inExam', { name: esc(examName) }) : '') + topicPhrase + (ready && src.id !== 'all' && unitsFrom(narrow(srcPool, topicsSel, examsSel)).flat().length > poolSize[src.id] ? t('phrase.plusBlocks') : '');
+  const mix = t('lead.mix'), rnd = t('lead.rnd', { n });
   const lead = isExam
-    ? `${ex.title}: ${n} Fragen ${settings.examOpts.shuffle ? 'in zufälliger Reihenfolge, Antworten gemischt' : 'in Originalreihenfolge'}. ${ex.hint || (ex.official
-        ? CFG.explHint
-        : 'Für diese Prüfung liegen nur die Lösungen vor, keine Begründungen.')}`
-    : src.id === 'errors' ? `${n} zufällige Frage${n === 1 ? '' : 'n'} aus ${poolSize.errors === 1 ? 'deiner 1 Fehlerfrage' : `deinen ${poolSize.errors} Fehlerfragen`} (zuletzt falsch beantwortet)${plusBlocks}. Fragen und Antwortoptionen werden jedes Mal neu gemischt.`
-    : src.id === 'flagged' ? `${n} zufällige Frage${n === 1 ? '' : 'n'} aus ${poolSize.flagged === 1 ? 'deiner 1 markierten Frage' : `deinen ${poolSize.flagged} markierten Fragen`}${plusBlocks}. Fragen und Antwortoptionen werden jedes Mal neu gemischt.`
-    : src.id === 'both' ? `${n} zufällige Fragen aus ${poolSize.both} Fehler- und markierten Fragen${plusBlocks}. Fragen und Antwortoptionen werden jedes Mal neu gemischt.`
-    : `${settings.count ? `${n} zufällige Fragen` : `Alle ${n} Fragen`} aus ${examName ? esc(examName) + topicPhrase : topicsSel.length ? (topicsSel.length === 1 ? `dem Themenbereich „${esc(topicsSel[0])}“` : `${topicsSel.length} Themenbereichen`) : 'dem Gesamtkatalog'}, ${settings.count ? 'ohne Wiederholung' : 'in zufälliger Reihenfolge'}. Fragen und Antwortoptionen werden jedes Mal neu gemischt. Nach der Antwort siehst du Lösung und Begründung.`;
-  const blockNote = GROUPS && Object.keys(GROUPS).length ? ' Zuordnungsblöcke (3 Teilfragen mit gemeinsamer Optionsliste) werden immer vollständig gezogen; ihre Optionen bleiben in Originalreihenfolge.' : '';
+    ? t('lead.exam', { title: esc(t(ex.title)), n, order: t(settings.examOpts.shuffle ? 'lead.orderShuffled' : 'lead.orderOriginal'),
+        hint: ex.hint ? t(ex.hint) : ex.official ? cfgT(CFG.explHint) : t('lead.noExpl') })
+    : src.id === 'errors' ? t('lead.errors', { rnd, from: t('lead.fromErrors', { n: poolSize.errors }), plus: plusBlocks, mix })
+    : src.id === 'flagged' ? t('lead.flagged', { rnd, from: t('lead.fromFlagged', { n: poolSize.flagged }), plus: plusBlocks, mix })
+    : src.id === 'both' ? t('lead.both', { n, pool: poolSize.both, plus: plusBlocks, mix })
+    : t('lead.all', { rnd: settings.count ? t('lead.allRnd', { n }) : t('lead.allAll', { n }),
+        from: examName ? esc(examName) + topicPhrase : topicsSel.length ? (topicsSel.length === 1 ? t('lead.fromTopic1', { name: esc(topicLabel(topicsSel[0])) }) : t('lead.fromTopicN', { n: topicsSel.length })) : t('lead.fromCatalog'),
+        order: t(settings.count ? 'lead.noRepeat' : 'lead.randomOrder'), mix });
+  const blockNote = GROUPS && Object.keys(GROUPS).length ? t('lead.blockNote') : '';
 
   return `
-  ${CFG.hint && !hintDismissed() ? `<div class="hint-banner" role="note"><p>${esc(CFG.hint)}${feedbackUrl() ? ` <a href="${esc(feedbackUrl('Feedback zum ' + CFG.appTitle + ': '))}" target="_blank" rel="noopener">Feedback per Teams geben</a>` : ''}</p><button type="button" class="hint-x" data-hintx aria-label="Hinweis schließen"><span aria-hidden="true">✕</span></button></div>` : ''}
+  ${CFG.hint && !hintDismissed() ? `<div class="hint-banner" role="note"><p>${esc(cfgT(CFG.hint))}${feedbackUrl() ? ` <a href="${esc(feedbackUrl(t('fb.msgGeneral', { app: appName() })))}" target="_blank" rel="noopener">${t('hint.feedback')}</a>` : ''}</p><button type="button" class="hint-x" data-hintx aria-label="${esc(t('hint.close'))}"><span aria-hidden="true">✕</span></button></div>` : ''}
   <section class="hero">
     <div>
-      <h1>Prüfungstrainer – üben wie in der echten Prüfung</h1>
+      <h1>${t('start.h1')}</h1>
       <fieldset class="picker">
-        <legend>1 · Was möchtest du tun?</legend>
+        <legend>${t('step.1')}</legend>
         <div class="picker-grid">${modeCards}</div>
       </fieldset>
       ${isExam ? `
       <fieldset class="picker">
-        <legend>2 · Welche Prüfung möchtest du schreiben?</legend>
+        <legend>${t('step.2exam')}</legend>
         <div class="picker-grid">${examCards}</div>
       </fieldset>` : `
       <fieldset class="picker">
-        <legend>2 · Mit wie vielen Fragen möchtest du üben?</legend>
+        <legend>${t('step.2train')}</legend>
         ${countSlider}
       </fieldset>
       <section class="filter${filterOpen ? ' open' : ''}">
         <button type="button" class="filter-head" data-ftoggle aria-expanded="${filterOpen}" aria-controls="filterBody">
-          <span class="fh-title">Filter<svg class="fh-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span>
+          <span class="fh-title">${t('filter.title')}<svg class="fh-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span>
           ${filterParts.length ? `<span class="filter-sum">${esc(filterParts.join(' · '))}</span>` : ''}
-          <span class="sr">${filterOpen ? 'Filter ausblenden' : 'Filter einblenden'}</span>
+          <span class="sr">${t(filterOpen ? 'filter.hide' : 'filter.show')}</span>
         </button>
         ${filterOpen ? `<div class="filter-body" id="filterBody">
-          ${filterParts.length ? `<div class="filter-reset"><button type="button" class="linkbtn" data-freset>Filter zurücksetzen</button></div>` : ''}
-          ${frow('Fragenart', 'Alle Fragen, nur deine Fehlerfragen (zuletzt falsch beantwortet), nur markierte oder beides. Es gilt immer genau eine Auswahl.', sourceChips)}
-          ${EXAMS.length > 1 ? frow('Fragequellen', 'Aus welchen Prüfungen geübt wird: „Alle“ oder eine bzw. mehrere Prüfungen (Mehrfachauswahl).', examButtons) : ''}
-          ${frow('Themenbereiche', 'Welche Themenbereiche geübt werden: „Alle“ oder ein bzw. mehrere Themen (Mehrfachauswahl).', topicButtons)}
-          ${CFG.topicNote ? `<p class="time-note topic-note">${esc(CFG.topicNote)}</p>` : ''}
+          ${filterParts.length ? `<div class="filter-reset"><button type="button" class="linkbtn" data-freset>${t('filter.reset')}</button></div>` : ''}
+          ${frow('Fragenart', t('filter.kind'), t('filter.kindHelp'), sourceChips)}
+          ${EXAMS.length > 1 ? frow('Fragequellen', t('filter.sources'), t('filter.sourcesHelp'), examButtons) : ''}
+          ${frow('Themenbereiche', t('filter.topics'), t('filter.topicsHelp'), topicButtons)}
+          ${CFG.topicNote ? `<p class="time-note topic-note">${esc(cfgT(CFG.topicNote))}</p>` : ''}
         </div>` : ''}
-        ${(src.id !== 'all' || topicsSel.length || examsSel.length) && settings.count && n < settings.count ? `<p class="time-note">${poolSize[src.id] ? `Es gibt nur ${poolSize[src.id]} passende Fragen${n !== poolSize[src.id] ? ` (mit vollständigen Zuordnungsblöcken ${n})` : ''} – die Übung wird entsprechend kürzer.` : 'Dafür gibt es noch keine Fragen. Fehlerfragen entstehen aus falsch beantworteten Fragen, markierte über „Markieren“ während einer Prüfung oder Übung.'}</p>` : ''}
+        ${(src.id !== 'all' || topicsSel.length || examsSel.length) && settings.count && n < settings.count ? `<p class="time-note">${poolSize[src.id] ? t('filter.few', { pool: poolSize[src.id], blocks: n !== poolSize[src.id] ? t('filter.fewBlocks', { n }) : '' }) : t('filter.none')}</p>` : ''}
       </section>`}
       <p class="lead wide">${lead}${isExam ? '' : blockNote}</p>
       <div class="facts">
-        <div class="fact"><b>${n}</b><span>Fragen</span></div>
-        <div class="fact"><b>${passMark(n)}</b><span>richtig zum Bestehen (${PASS_PCT}&nbsp;%)</span></div>
-        <div class="fact"><b>${timeText}</b><span>${opts.sim ? 'Zeitlimit wie in der echten Prüfung' : 'ohne Zeitlimit, Zeit wird gemessen'}</span></div>
+        <div class="fact"><b>${n}</b><span>${t('facts.questions')}</span></div>
+        <div class="fact"><b>${passMark(n)}</b><span>${t('facts.pass', { pct: PASS_PCT })}</span></div>
+        <div class="fact"><b>${timeText}</b><span>${t(opts.sim ? 'facts.timeSim' : 'facts.timeFree')}</span></div>
       </div>
-      ${isExam && ready ? `<div class="topics">${Object.entries(topics).map(([t, c]) => `<span class="chip"><b>${c}</b> ${esc(t)}</span>`).join('')}</div>` : ''}
+      ${isExam && ready ? `<div class="topics">${Object.entries(topics).map(([tp, c]) => `<span class="chip"><b>${c}</b> ${esc(topicLabel(tp))}</span>`).join('')}</div>` : ''}
     </div>
     <div class="card">
-      <h2>3 · Einstellungen</h2>
-      ${switchRow('optSim', opts.sim, 'Reale Prüfungssimulation',
-        `Kein Feedback während der ${isExam ? 'Prüfung' : 'Übung'}. Rückmeldungen (korrekte Antworten und ggf. Begründungen) werden erst nach Abgabe der ${isExam ? 'Prüfung' : 'Übung'} angezeigt. Zeitlimit: ${minutesFor(n)} Minuten für ${n} Fragen (Verhältnis wie in der echten Prüfung).`)}
-      ${isExam ? switchRow('optShuffle', settings.examOpts.shuffle, 'Fragen mischen',
-        `Zufällige Reihenfolge der Fragen und der Antwortoptionen statt Originalreihenfolge.${Object.keys(GROUPS).length ? ' Zuordnungsblöcke bleiben zusammen, ihre Optionsliste bleibt unverändert.' : ''}`) : `
+      <h2>${t('set.title')}</h2>
+      ${switchRow('optSim', opts.sim, t('set.simTitle'),
+        t('set.simText', { noun: t(isExam ? 'noun.exam' : 'noun.practice'), min: minutesFor(n), n }))}
+      ${isExam ? switchRow('optShuffle', settings.examOpts.shuffle, t('set.shuffleTitle'),
+        t('set.shuffleText') + (Object.keys(GROUPS).length ? t('set.shuffleBlocks') : '')) : `
       <div class="opt-row info"><span class="info-icon" aria-hidden="true">↻</span>
-        <span><b>Immer gemischt</b><span>Fragen und Antwortoptionen werden bei jedem Training neu gemischt.</span></span>
+        <span><b>${t('set.alwaysShuffled')}</b><span>${t('set.alwaysShuffledText')}</span></span>
       </div>`}
       <p class="time-note">${opts.sim
-        ? `Zeit: Countdown ${minutesFor(n)} Minuten, danach wird automatisch abgegeben.`
-        : 'Zeit: Stoppuhr läuft mit, kein Zeitlimit.'}</p>
+        ? t('set.timeSim', { min: minutesFor(n) })
+        : t('set.timeFree')}</p>
       <div class="nav" style="margin-top:var(--space-5)">
-        <button class="btn primary" id="startBtn" style="width:100%;justify-content:center" ${canStart ? '' : 'disabled'}>${isExam ? `${esc(ex.title)} starten` : `${src.title}${esc(filterTitle(topicsSel, examsSel))} · ${n} Frage${n === 1 ? '' : 'n'} starten`}</button>
+        <button class="btn primary" id="startBtn" style="width:100%;justify-content:center" ${canStart ? '' : 'disabled'}>${t('start.btn', { title: isExam ? esc(t(ex.title)) : esc(trainingTitle(src, topicsSel, examsSel, n)) })}</button>
       </div>
-      ${state.loading ? '<p class="load-note">Fragenkatalog wird geladen …</p>' : ''}
-      ${state.loadError ? `<p class="load-note err">${esc(state.loadError)}</p>` : ''}
+      ${state.loading ? `<p class="load-note">${t('load.wait')}</p>` : ''}
+      ${state.loadError ? `<p class="load-note err">${esc(t(state.loadError.key, state.loadError.vars))}</p>` : ''}
     </div>
   </section>`;
 }
 
 function originHint(item){
   const s = state.session;
-  if(s.mode === 'exam') return s.shuffle ? ` · Original-Nr. ${item.origNo}` : '';
-  return ` · Herkunft: ${item.q.origin.join(', ')}`;
+  if(s.mode === 'exam') return s.shuffle ? t('origin.orig', { n: item.origNo }) : '';
+  return t('origin.from', { list: item.q.origin.join(', ') });
 }
 
 function viewExam(){
-  const s = state.session, item = current(), q = item.q, total = s.items.length;
+  const s = state.session, item = current(), q = item.q, Q = L(q), total = s.items.length;
   const chosen = s.answers[q.id];                      // gespeicherter Schlüssel
   const answered = Object.keys(s.answers).length;
   const hidden = s.sim && !state.reviewMode;           // Simulation: Lösung erst nach Abgabe
@@ -846,21 +880,21 @@ function viewExam(){
   const locked = state.reviewMode || (chosen && !s.sim);
   const awaiting = !s.sim && !state.reviewMode && !chosen;   // ohne Simulation: Frage noch nicht bestätigt
   const picked = awaiting ? s.pending?.[q.id] : null;       // aktuelle, unbestätigte Auswahl
-  const noun = s.mode === 'exam' ? 'Prüfung' : 'Übung';
+  const noun = nounOf(s);
 
   const options = item.perm.map((key, i) => {
     const L = LETTERS[i];
     let cls = 'opt', tag = '', mark = '';
     if(hidden){
-      if(key === chosen){ cls += ' selected'; tag = 'Deine Antwort'; }
+      if(key === chosen){ cls += ' selected'; tag = t('opt.mine'); }
     } else if(awaiting){
-      if(key === picked){ cls += ' selected'; tag = 'Ausgewählt'; }
+      if(key === picked){ cls += ' selected'; tag = t('opt.selected'); }
     } else if(reveal){
-      if(isRight(q, key)){ cls += ' correct'; tag = 'Richtige Antwort'; mark = ICON_CHECK; }
-      else if(key === chosen){ cls += ' wrong'; tag = 'Deine Antwort'; mark = ICON_X; }
+      if(isRight(q, key)){ cls += ' correct'; tag = t('opt.right'); mark = ICON_CHECK; }
+      else if(key === chosen){ cls += ' wrong'; tag = t('opt.mine'); mark = ICON_X; }
     }
     return `<button class="${cls}" data-choose="${L}" ${locked ? 'disabled' : ''} aria-pressed="${(chosen || picked) === key}">
-      <span class="letter">${mark ? `${mark}<span class="sr">${L}</span>` : L}</span><span>${esc(q.opts[key])}</span>${tag ? `<span class="tag">${tag}</span>` : ''}
+      <span class="letter">${mark ? `${mark}<span class="sr">${L}</span>` : L}</span><span>${esc(Q.opts[key])}</span>${tag ? `<span class="tag">${tag}</span>` : ''}
     </button>`;
   }).join('');
 
@@ -869,18 +903,18 @@ function viewExam(){
     const ok = isRight(q, chosen);
     const withExpl = hasExpl(q);
     const body = withExpl
-      ? explRows(item, chosen).map(r => `<div class="expl ${r.right ? 'right' : 'other'}${r.mine ? ' mine' : ''}"><span class="letter${r.letters.length > 1 ? ' multi' : ''}">${r.letters.join(' · ')}</span><div><span class="verdict">${r.right ? 'Richtig' : r.keys.length > 1 ? 'Übrige Optionen: falsch' : 'Falsch'}${r.mine ? ' – deine Auswahl' : ''}</span><p>${esc(r.text)}</p></div></div>`).join('')
-      : rightKeys(q).map((key, i, all) => `<div class="expl right"><span class="letter">${shown(item, key)}</span><div><span class="verdict">Richtig ist ${shown(item, key)} (${esc(q.opts[key])})</span>${q.rationale && i === all.length - 1 ? `<p>${esc(q.rationale)}</p>` : ''}</div></div>`).join('');
+      ? explRows(item, chosen).map(r => `<div class="expl ${r.right ? 'right' : 'other'}${r.mine ? ' mine' : ''}"><span class="letter${r.letters.length > 1 ? ' multi' : ''}">${r.letters.join(' · ')}</span><div><span class="verdict">${t(r.right ? 'verdict.right' : r.keys.length > 1 ? 'verdict.others' : 'verdict.wrong')}${r.mine ? t('verdict.mine') : ''}</span><p>${esc(r.text)}</p></div></div>`).join('')
+      : rightKeys(q).map((key, i, all) => `<div class="expl right"><span class="letter">${shown(item, key)}</span><div><span class="verdict">${t('verdict.rightIs', { l: shown(item, key), text: esc(Q.opts[key]) })}</span>${Q.rationale && i === all.length - 1 ? `<p>${esc(Q.rationale)}</p>` : ''}</div></div>`).join('');
     feedback = `
     <div class="feedback">
       <div class="fb-head ${ok ? 'ok' : 'bad'}">
-        ${ok ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span>Richtig – gut gemacht.</span>'
-             : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg><span>${chosen ? 'Leider falsch.' : 'Nicht beantwortet.'} Richtig ist <strong>${rightLabel(item)}</strong>.</span>`}
+        ${ok ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span>' + t('fb.ok') + '</span>'
+             : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg><span>${t(chosen ? 'fb.wrongLine' : 'fb.openLine', { right: rightLabel(item) })}</span>`}
       </div>
       <div class="fb-body">
-        <div class="fb-title"><h3>${withExpl || q.rationale ? 'Begründung' : 'Lösung'}</h3>${feedbackUrl() ? `<a class="btn" href="${esc(feedbackUrl('Frage ' + q.id + ' (' + q.origin.join(', ') + '): '))}" target="_blank" rel="noopener">Fehler melden</a>` : ''}</div>
+        <div class="fb-title"><h3>${t(withExpl || Q.rationale ? 'fb.rationale' : 'fb.solution')}</h3>${feedbackUrl() ? `<a class="btn" href="${esc(feedbackUrl(t('fb.msgQuestion', { id: q.id, origin: q.origin.join(', ') })))}" target="_blank" rel="noopener">${t('fb.report')}</a>` : ''}</div>
         ${body}
-        <div class="ref">${q.ref ? `<span>${esc(CFG.refLabel ? CFG.refLabel + ':' : 'Lehrplan-Referenz:')} <code>${esc(q.ref)}</code></span><span>${esc(CFG.refHint)}</span>` : ''}${!q.ref && q.topic && CFG.topicNoteShort ? `<span>Themenbereich: ${esc(q.topic)} (${esc(CFG.topicNoteShort)})</span>` : ''}<span>Frage-ID: <code>${q.id}</code> · ${esc(q.origin.join(', '))}</span></div>
+        <div class="ref">${q.ref ? `<span>${esc(cfgT(CFG.refLabel))}: <code>${esc(refLabel(q.ref))}</code></span><span>${esc(cfgT(CFG.refHint))}</span>` : ''}${!q.ref && q.topic && CFG.topicNoteShort ? `<span>${t('ref.topic', { topic: esc(topicLabel(q.topic)), short: esc(cfgT(CFG.topicNoteShort)) })}</span>` : ''}<span>${t('ref.id')} <code>${q.id}</code> · ${esc(q.origin.join(', '))}</span></div>
       </div>
     </div>`;
   }
@@ -891,19 +925,19 @@ function viewExam(){
     if(a) cls += hidden ? ' done' : (isRight(it.q, a) ? ' ok' : ' bad');
     if(i === state.pos) cls += ' cur';
     if(s.flags.has(it.q.id)) cls += ' flag';
-    return `<button class="${cls}" data-go="${i}" aria-label="Frage ${i + 1}">${i + 1}</button>`;
+    return `<button class="${cls}" data-go="${i}" aria-label="${esc(t('nav.qAria', { n: i + 1 }))}">${i + 1}</button>`;
   }).join('');
   const flagged = s.flags.has(q.id);
   // Navigationsleiste – identisch über der Frage und unter den Antworten (daher data-Attribute statt IDs)
   const navBar = where => `<div class="nav ${where}">
-        <button class="btn" data-nav="-1" ${state.pos === 0 ? 'disabled' : ''}>← Zurück</button>
-        <button class="btn ${flagged ? 'flagged' : ''}" data-flag>${flagged ? '⚑ Markiert' : '⚐ Markieren'}</button>
-        ${awaiting ? `<button class="btn primary" data-confirm ${picked ? '' : 'disabled'} title="Antwort werten (Enter)">Bestätigen</button>` : ''}
+        <button class="btn" data-nav="-1" ${state.pos === 0 ? 'disabled' : ''}>${t('nav.back')}</button>
+        <button class="btn ${flagged ? 'flagged' : ''}" data-flag>${t(flagged ? 'nav.flagged' : 'nav.flag')}</button>
+        ${awaiting ? `<button class="btn primary" data-confirm ${picked ? '' : 'disabled'} title="${esc(t('nav.confirmTitle'))}">${t('nav.confirm')}</button>` : ''}
         <span class="spacer"></span>
-        ${state.reviewMode ? `<button class="btn" data-back>Zur Auswertung</button>` : ''}
+        ${state.reviewMode ? `<button class="btn" data-back>${t('nav.toResult')}</button>` : ''}
         ${state.pos < total - 1
-          ? (awaiting ? `<button class="btn" data-nav="1">Überspringen →</button>` : `<button class="btn primary" data-nav="1">Weiter →</button>`)
-          : (state.reviewMode ? '' : `<button class="btn primary" data-finish>${noun} abgeben</button>`)}
+          ? (awaiting ? `<button class="btn" data-nav="1">${t('nav.skip')}</button>` : `<button class="btn primary" data-nav="1">${t('nav.next')}</button>`)
+          : (state.reviewMode ? '' : `<button class="btn primary" data-finish>${t('nav.submit', { noun })}</button>`)}
       </div>`;
 
   return `
@@ -911,34 +945,34 @@ function viewExam(){
     <section>
       <div class="progress" role="progressbar" aria-valuenow="${answered}" aria-valuemax="${total}"><i style="width:${answered / total * 100}%"></i></div>
       <div class="qmeta">
-        <span class="qnum">Frage ${state.pos + 1} von ${total}</span>
-        ${hidden ? '<span class="mode-badge">Prüfungssimulation</span>' : ''}
-        <span class="qtopic">${q.topic ? `· ${esc(q.topic)}` : ''}${originHint(item)}</span>
-        ${item.focus ? `<span class="focus-badge">${esc(item.focus)}</span>` : ''}
-        ${SCENARIO ? `<button class="btn small scen-btn${state.scenOpen ? ' active' : ''}" data-scen aria-expanded="${!!state.scenOpen}" aria-controls="scenPanel">${state.scenOpen ? 'Szenario ausblenden' : 'Szenario'}</button>` : ''}
+        <span class="qnum">${t('q.of', { i: state.pos + 1, n: total })}</span>
+        ${hidden ? `<span class="mode-badge">${t('badge.sim')}</span>` : ''}
+        <span class="qtopic">${q.topic ? `· ${esc(topicLabel(q.topic))}` : ''}${originHint(item)}</span>
+        ${item.focus ? `<span class="focus-badge">${esc(focusLabel(item.focus))}</span>` : ''}
+        ${SCENARIO ? `<button class="btn small scen-btn${state.scenOpen ? ' active' : ''}" data-scen aria-expanded="${!!state.scenOpen}" aria-controls="scenPanel">${t(state.scenOpen ? 'scen.hide' : 'scen.show')}</button>` : ''}
       </div>
       ${navBar('top')}
-      ${q.group ? `<div class="scenario group-intro">${esc(q.groupIntro)}</div>
-      <div class="group-pos">Zuordnung · Aussage ${groupPos(q)} von ${GROUPS[q.group].length}</div>` : ''}
-      ${q.scenario ? `<div class="scenario">${esc(q.scenario)}</div>` : ''}
-      <p class="qtext">${esc(q.question)}</p>
-      ${q.items.length ? `<ol class="items">${q.items.map((it, i) => `<li><b>${i + 1}.</b><span>${esc(it)}</span></li>`).join('')}</ol>` : ''}
+      ${q.group ? `<div class="scenario group-intro">${esc(Q.groupIntro)}</div>
+      <div class="group-pos">${t('group.pos', { i: groupPos(q), n: GROUPS[q.group].length })}</div>` : ''}
+      ${Q.scenario ? `<div class="scenario">${esc(Q.scenario)}</div>` : ''}
+      <p class="qtext">${esc(Q.question)}</p>
+      ${Q.items.length ? `<ol class="items">${Q.items.map((it, i) => `<li><b>${i + 1}.</b><span>${esc(it)}</span></li>`).join('')}</ol>` : ''}
       <div class="options">${options}</div>
       ${feedback}
       ${navBar('bottom')}
     </section>
     <aside class="side">
-      <h2>Übersicht <span>${answered}/${total} beantwortet</span></h2>
+      <h2>${t('side.overview')} <span>${t('side.answered', { a: answered, n: total })}</span></h2>
       <div class="grid">${cells}</div>
       <div class="legend">
         ${hidden
-          ? `<span><i style="background:var(--accent);border-color:var(--accent)"></i> beantwortet</span>`
-          : `<span><i style="background:var(--ok);border-color:var(--ok)"></i> richtig</span>
-        <span><i style="background:var(--bad);border-color:var(--bad)"></i> falsch</span>`}
-        <span><i></i> offen</span>
-        <span><i style="background:var(--flag);border-color:var(--flag);border-radius:999px"></i> markiert</span>
+          ? `<span><i style="background:var(--accent);border-color:var(--accent)"></i> ${t('legend.answered')}</span>`
+          : `<span><i style="background:var(--ok);border-color:var(--ok)"></i> ${t('legend.right')}</span>
+        <span><i style="background:var(--bad);border-color:var(--bad)"></i> ${t('legend.wrong')}</span>`}
+        <span><i></i> ${t('legend.open')}</span>
+        <span><i style="background:var(--flag);border-color:var(--flag);border-radius:999px"></i> ${t('legend.flagged')}</span>
       </div>
-      ${state.reviewMode ? `<button class="btn" id="backToResult2">Zur Auswertung</button>` : `<button class="btn" id="finishBtn2">${noun} abgeben</button>`}
+      ${state.reviewMode ? `<button class="btn" id="backToResult2">${t('nav.toResult')}</button>` : `<button class="btn" id="finishBtn2">${t('nav.submit', { noun })}</button>`}
     </aside>
   </div>`;
 }
@@ -952,109 +986,108 @@ function viewResult(){
   const rows = s.items.map((it, i) => ({ it, i }));
   const wrong = rows.filter(({it}) => s.answers[it.q.id] && !isRight(it.q, s.answers[it.q.id]));
   const open = rows.filter(({it}) => !s.answers[it.q.id]);
-  const noun = s.mode === 'exam' ? 'Prüfung' : 'Übung';
-  const time = s.limit ? `Benötigte Zeit: ${fmt(s.elapsed)} von ${fmt(s.limit)} Minuten.` : `Benötigte Zeit: ${fmt(s.elapsed)} Minuten.`;
-  const line = ({it, i}, cls, extra) => `<button class="rv" data-review="${i}"><span class="n ${cls}">${i + 1}</span><span>${esc(qLabel(it.q))}<small>${extra}Richtig: ${rightText(it)} · ${esc(it.q.origin.join(', '))}</small></span></button>`;
+  const noun = nounOf(s);
+  const time = s.limit ? t('res.time', { a: fmt(s.elapsed), b: fmt(s.limit) }) : t('res.timeNoLimit', { a: fmt(s.elapsed) });
+  const line = ({it, i}, cls, extra) => `<button class="rv" data-review="${i}"><span class="n ${cls}">${i + 1}</span><span>${esc(qLabel(it.q))}<small>${extra}${t('res.rightLine', { right: rightText(it), origin: esc(it.q.origin.join(', ')) })}</small></span></button>`;
   return `
   <section class="result-head">
     <div class="ring ${passed ? '' : 'fail'}">
       <svg viewBox="0 0 170 170"><circle class="track" cx="85" cy="85" r="${r}"/><circle class="val" cx="85" cy="85" r="${r}" stroke-dasharray="${circ}" stroke-dashoffset="${circ * (1 - sc / total)}"/></svg>
-      <div class="num"><div><b>${sc}/${total}</b><br><span>${pct} % richtig</span></div></div>
+      <div class="num"><div><b>${sc}/${total}</b><br><span>${t('res.pctRight', { pct })}</span></div></div>
     </div>
     <div>
-      <div class="eyebrow">Auswertung · ${esc(s.title)}${s.sim ? ' · Prüfungssimulation' : ''}</div>
-      <div class="verdict-big ${passed ? 'ok' : 'bad'}">${passed ? 'Bestanden' : 'Nicht bestanden'}</div>
+      <div class="eyebrow">${t('result.eyebrow', { title: esc(sessionTitle(s)) })}${s.sim ? ' · ' + t('badge.sim') : ''}</div>
+      <div class="verdict-big ${passed ? 'ok' : 'bad'}">${t(passed ? 'res.passed' : 'res.failed')}</div>
       <p class="lead" style="margin-bottom:var(--space-4)">${passed
-        ? `Du hast ${sc} von ${total} Fragen richtig beantwortet – die Bestehensgrenze liegt bei ${pass} (${PASS_PCT} %).`
-        : `Du hast ${sc} von ${total} Fragen richtig beantwortet. Für das Bestehen fehlen dir noch ${pass - sc} richtige Antwort${pass - sc === 1 ? '' : 'en'} (Grenze: ${pass}).`}
-        ${s.timeout ? ` Die Zeit ist abgelaufen – die ${noun} wurde automatisch abgegeben.` : ''}
+        ? t('res.passText', { sc, total, pass, pct: PASS_PCT })
+        : t('res.failText', { sc, total, pass, n: pass - sc })}
+        ${s.timeout ? ' ' + t('res.timeout', { noun }) : ''}
         ${time}
       </p>
       <div class="nav" style="margin-top:0">
-        ${s.past ? '<button class="btn" id="backToProgress">← Lernfortschritt</button>' : ''}
-        <button class="btn primary" id="restartBtn">Neue ${s.mode === 'exam' ? 'Prüfung' : 'Übung'} starten</button>
-        <button class="btn" id="reviewAllBtn">Alle Fragen durchsehen</button>
-        <button class="btn" id="reportBtn">⤓ Bericht herunterladen</button>
+        ${s.past ? `<button class="btn" id="backToProgress">${t('res.toProgress')}</button>` : ''}
+        <button class="btn primary" id="restartBtn">${t('res.restart', { noun })}</button>
+        <button class="btn" id="reviewAllBtn">${t('res.reviewAll')}</button>
+        <button class="btn" id="reportBtn">${t('res.report')}</button>
       </div>
-      <p class="time-note">${s.past ? `Durchlauf vom ${fmtDate(s.date)}.` : s.saved
-        ? 'Dieser Durchlauf ist im Lernfortschritt gespeichert. Der Bericht enthält alle Fragen mit Lösungen und Begründungen zum Offline-Lernen.'
-        : 'Achtung: Dieser Durchlauf konnte nicht gespeichert werden (Browser-Speicher nicht verfügbar). Lade den Bericht herunter, um ihn zu behalten.'}</p>
+      <p class="time-note">${s.past ? t('res.runOf', { date: fmtDate(s.date) }) : s.saved
+        ? t('res.saved')
+        : t('res.notSaved')}</p>
     </div>
   </section>
-  ${s.past ? '' : `<div class="backup-hint"><p><b>Lernfortschritt sichern</b>Der Verlauf liegt nur in diesem Browser. Lade eine Sicherung herunter und lege sie z. B. in iCloud, Google Drive oder OneDrive ab – für ein anderes Gerät oder falls Browserdaten gelöscht werden.</p>${state.notice === 'Sicherung erstellt.' ? (state.notice = null, '<span class="backup-done">✓ Sicherung erstellt</span>') : '<button class="btn" data-backup>⤓ Sicherung herunterladen</button>'}</div>`}
+  ${s.past ? '' : `<div class="backup-hint"><p>${t('res.backupHint')}</p>${state.notice === t('notice.backupDone') ? (state.notice = null, `<span class="backup-done">${t('backup.doneBadge')}</span>`) : `<button class="btn" data-backup>${t('backup.download')}</button>`}</div>`}
 
-  ${Object.keys(topics).length ? `<h2 class="section-title">Ergebnis nach Themenbereich</h2>
+  ${Object.keys(topics).length ? `<h2 class="section-title">${t('topics.result')}</h2>
   <div class="topic-list">
-    ${Object.entries(topics).map(([t, v]) => `<div class="topic-row"><span>${esc(t)} <span style="color:var(--text-muted)">(${v.c}/${v.n})</span></span><div class="bar"><i style="width:${v.c / v.n * 100}%"></i></div><span class="pct">${Math.round(v.c / v.n * 100)} %</span></div>`).join('')}
-  </div>${s.mode === 'training' && Object.values(topics).reduce((a, v) => a + v.n, 0) < total ? '<p class="time-note">Mock-Fragen ohne Themenzuordnung sind hier nicht enthalten.</p>' : ''}` : ''}
+    ${Object.entries(topics).map(([tp, v]) => `<div class="topic-row"><span>${esc(topicLabel(tp))} <span style="color:var(--text-muted)">(${v.c}/${v.n})</span></span><div class="bar"><i style="width:${v.c / v.n * 100}%"></i></div><span class="pct">${Math.round(v.c / v.n * 100)} %</span></div>`).join('')}
+  </div>${s.mode === 'training' && Object.values(topics).reduce((a, v) => a + v.n, 0) < total ? `<p class="time-note">${t('res.noTopicNote')}</p>` : ''}` : ''}
 
-  ${wrong.length ? `<h2 class="section-title">Falsch beantwortet (${wrong.length})</h2>
-  <div class="review">${wrong.map(w => line(w, 'bad', `Deine Antwort: ${shown(w.it, s.answers[w.it.q.id])} · `)).join('')}</div>` : ''}
+  ${wrong.length ? `<h2 class="section-title">${t('res.h.wrong', { n: wrong.length })}</h2>
+  <div class="review">${wrong.map(w => line(w, 'bad', t('res.yourAnswer', { l: shown(w.it, s.answers[w.it.q.id]) }))).join('')}</div>` : ''}
 
-  ${open.length ? `<h2 class="section-title">Nicht beantwortet (${open.length})</h2>
+  ${open.length ? `<h2 class="section-title">${t('res.h.open', { n: open.length })}</h2>
   <div class="review">${open.map(o => line(o, 'skip', '')).join('')}</div>` : ''}
 
-  ${!wrong.length && !open.length ? `<p class="lead" style="margin-top:var(--space-6)">Alle ${total} Fragen richtig – volle Punktzahl.</p>` : ''}`;
+  ${!wrong.length && !open.length ? `<p class="lead" style="margin-top:var(--space-6)">${t('res.perfect', { total })}</p>` : ''}`;
 }
 
 /* Sicherungsknopf für Fenster; nach dem Herunterladen Bestätigung statt Knopf */
-const backupBtn = (label = '⤓ Sicherung herunterladen') => state.modal?.backedUp
-  ? '<span class="backup-done">✓ Sicherung erstellt</span>' : `<button class="btn" data-backup>${label}</button>`;
-const BACKUP_HINT = 'Die Datei enthält deinen Lernfortschritt und diesen Durchlauf. Lege sie z. B. in iCloud, Google Drive oder OneDrive ab, um auf einem anderen Gerät oder nach dem Löschen der Browserdaten weiterzumachen.';
+const backupBtn = (label = t('backup.download')) => state.modal?.backedUp
+  ? `<span class="backup-done">${t('backup.doneBadge')}</span>` : `<button class="btn" data-backup>${label}</button>`;
 function runInfo(d, newer){
   const done = Object.keys(d.answers || {}).filter(id => d.items.some(x => x.id === id)).length;
-  return `<strong>${esc(d.title)}</strong>${d.sim ? ' · Prüfungssimulation' : ''}<br>${done} von ${d.items.length} Fragen beantwortet · ${d.limit ? `Restzeit ${fmt(d.limit - d.elapsed)}` : `Dauer bisher ${fmt(d.elapsed)}`}<br>Stand vom ${fmtDate(d.savedAt)}${newer ? ' · <b>neuer</b>' : ''}`;
+  return `<strong>${esc(sessionTitle(d))}</strong>${d.sim ? ' · ' + t('badge.sim') : ''}<br>${t('run.answered', { done, total: d.items.length })} · ${d.limit ? t('run.timeLeft', { time: fmt(d.limit - d.elapsed) }) : t('run.timeSoFar', { time: fmt(d.elapsed) })}<br>${t('run.stand', { date: fmtDate(d.savedAt) })}${newer ? t('run.newer') : ''}`;
 }
 function viewModal(){
-  if(state.modal.type === 'stay'){ const noun = state.session.mode === 'exam' ? 'Prüfung' : 'Übung'; return `<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="stayTitle"><div class="card">
-    <h2 id="stayTitle">Fortschritt sichern?</h2>
-    <p>Deine ${noun} ist in diesem Browser zwischengespeichert und lässt sich nach dem Neuladen fortsetzen. Sicherer ist eine Sicherungsdatei: Sie enthält deinen Lernfortschritt und diesen Durchlauf. Lege sie z. B. in iCloud, Google Drive oder OneDrive ab, um auf einem anderen Gerät oder nach dem Löschen der Browserdaten weiterzumachen.</p>
-    <div class="nav">${backupBtn()}<span class="spacer"></span><button class="btn primary" id="modalStay">Weiter üben</button></div>
+  if(state.modal.type === 'stay'){ const noun = nounOf(state.session); return `<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="stayTitle"><div class="card">
+    <h2 id="stayTitle">${t('stay.title')}</h2>
+    <p>${t('stay.text', { noun })}</p>
+    <div class="nav">${backupBtn()}<span class="spacer"></span><button class="btn primary" id="modalStay">${t('stay.continue')}</button></div>
   </div></div>`; }
   if(state.modal.type === 'choose'){ const m = state.modal; return `<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="chooseTitle"><div class="card">
-    <h2 id="chooseTitle">Welchen Durchlauf fortsetzen?</h2>
-    <p>Die Sicherung enthält einen unterbrochenen Durchlauf – auf diesem Gerät ist aber schon ein anderer unterbrochen. Nur einer kann fortgesetzt werden, der andere wird verworfen.</p>
-    <p><b>Aus der Sicherung:</b><br>${runInfo(m.fromFile, m.fromFile.savedAt > m.local.savedAt)}</p>
-    <p><b>Auf diesem Gerät:</b><br>${runInfo(m.local, m.local.savedAt > m.fromFile.savedAt)}</p>
-    <div class="nav"><button class="btn" id="modalPickLocal">Stand auf diesem Gerät</button><span class="spacer"></span><button class="btn primary" id="modalPickFile">Stand aus der Sicherung</button></div>
+    <h2 id="chooseTitle">${t('choose.title')}</h2>
+    <p>${t('choose.text')}</p>
+    <p><b>${t('choose.fromFile')}</b><br>${runInfo(m.fromFile, m.fromFile.savedAt > m.local.savedAt)}</p>
+    <p><b>${t('choose.local')}</b><br>${runInfo(m.local, m.local.savedAt > m.fromFile.savedAt)}</p>
+    <div class="nav"><button class="btn" id="modalPickLocal">${t('choose.pickLocal')}</button><span class="spacer"></span><button class="btn primary" id="modalPickFile">${t('choose.pickFile')}</button></div>
   </div></div>`; }
   if(state.modal.type === 'restore'){
-    const d = state.modal.saved, noun = d.mode === 'exam' ? 'Prüfung' : 'Übung';
+    const d = state.modal.saved, noun = nounOf(d);
     const done = Object.keys(d.answers || {}).filter(id => d.items.some(x => x.id === id)).length;
-    const timeInfo = d.limit ? `Restzeit ${fmt(d.limit - d.elapsed)}` : `Dauer bisher ${fmt(d.elapsed)}`;
+    const timeInfo = d.limit ? t('run.timeLeft', { time: fmt(d.limit - d.elapsed) }) : t('run.timeSoFar', { time: fmt(d.elapsed) });
     return `<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="restoreTitle"><div class="card">
-    <h2 id="restoreTitle">Unterbrochene ${noun} ${state.modal.fromFile ? 'aus der Sicherung ' : ''}fortsetzen?</h2>
-    <p><strong>${esc(d.title)}</strong>${d.sim ? ' · Prüfungssimulation' : ''}<br>${done} von ${d.items.length} Fragen beantwortet · ${timeInfo}<br>
-      Unterbrochen am ${fmtDate(d.savedAt)}. Die Zeit ist seitdem angehalten.</p>
-    <div class="nav"><button class="btn danger" id="modalDiscard">Verwerfen</button><span class="spacer"></span><button class="btn primary" id="modalRestore">Fortsetzen</button></div>
+    <h2 id="restoreTitle">${t(state.modal.fromFile ? 'restore.titleFile' : 'restore.title', { noun })}</h2>
+    <p><strong>${esc(sessionTitle(d))}</strong>${d.sim ? ' · ' + t('badge.sim') : ''}<br>${t('run.answered', { done, total: d.items.length })} · ${timeInfo}<br>
+      ${t('restore.text', { date: fmtDate(d.savedAt) })}</p>
+    <div class="nav"><button class="btn danger" id="modalDiscard">${t('restore.discard')}</button><span class="spacer"></span><button class="btn primary" id="modalRestore">${t('restore.continue')}</button></div>
   </div></div>`;
   }
   if(state.modal.type === 'pause'){
-    const s = state.session, noun = s.mode === 'exam' ? 'Prüfung' : 'Übung';
-    const timeInfo = s.limit ? `Restzeit <b>${fmt(s.limit - s.elapsed)}</b> · bisher ${fmt(s.elapsed)}` : `Dauer bisher <b>${fmt(s.elapsed)}</b>`;
+    const s = state.session, noun = nounOf(s);
+    const timeInfo = s.limit ? t('pause.timeLeft', { left: fmt(s.limit - s.elapsed), elapsed: fmt(s.elapsed) }) : t('pause.timeSoFar', { time: fmt(s.elapsed) });
     return `<div class="modal pause" id="modal" role="dialog" aria-modal="true" aria-labelledby="pauseTitle"><div class="card">
     <div class="pause-ico"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg></div>
-    <h2 id="pauseTitle">${noun} pausiert</h2>
-    <p>Die Zeit ist angehalten. ${timeInfo}<br>${Object.keys(s.answers).length} von ${s.items.length} Fragen beantwortet.</p>
-    <div class="nav"><button class="btn primary" id="modalResume">Weitermachen</button></div>
-    <div class="pause-backup">${backupBtn()}<p class="time-note">${BACKUP_HINT}</p></div>
+    <h2 id="pauseTitle">${t('pause.title', { noun })}</h2>
+    <p>${t('pause.text', { timeInfo, answered: t('run.answered', { done: Object.keys(s.answers).length, total: s.items.length }) })}</p>
+    <div class="nav"><button class="btn primary" id="modalResume">${t('pause.resume')}</button></div>
+    <div class="pause-backup">${backupBtn()}<p class="time-note">${t('backup.hint')}</p></div>
   </div></div>`;
   }
-  if(state.modal.type === 'leave'){ const noun = state.session.mode === 'exam' ? 'Prüfung' : 'Übung'; return `<div class="modal" id="modal"><div class="card">
-    <h2>${noun} abbrechen?</h2>
-    <p>Du bist mitten in einer ${noun}. Wenn du zur Startseite wechselst, wird dieser Durchlauf <strong>nicht gespeichert</strong>. Willst du ihn behalten, gib ihn zuerst ab – oder lade eine Sicherung herunter, um ihn später oder auf einem anderen Gerät fortzusetzen.</p>
-    <div class="nav">${backupBtn()}<span class="spacer"></span><button class="btn" id="modalCancel">Weiter bearbeiten</button><button class="btn primary danger" id="modalLeave">${noun} abbrechen</button></div>
+  if(state.modal.type === 'leave'){ const s = state.session, noun = nounOf(s); return `<div class="modal" id="modal"><div class="card">
+    <h2>${t('leave.title', { noun })}</h2>
+    <p>${t(s.mode === 'exam' ? 'leave.text_exam' : 'leave.text_practice')}</p>
+    <div class="nav">${backupBtn()}<span class="spacer"></span><button class="btn" id="modalCancel">${t('leave.keep')}</button><button class="btn primary danger" id="modalLeave">${t('leave.confirm', { noun })}</button></div>
   </div></div>`; }
   if(state.modal.type === 'clear') return `<div class="modal" id="modal"><div class="card">
-    <h2>Gesamten Verlauf löschen?</h2>
-    <p>${HISTORY.length === 1 ? 'Der gespeicherte Durchlauf wird' : `Alle ${HISTORY.length} gespeicherten Durchläufe werden`} aus diesem Browser entfernt. Das lässt sich nicht rückgängig machen – lade vorher eine Sicherung herunter, wenn du ihn behalten willst.</p>
-    <div class="nav"><button class="btn" id="modalCancel">Abbrechen</button><span class="spacer"></span><button class="btn primary danger" id="modalClear">Verlauf löschen</button></div>
+    <h2>${t('clear.title')}</h2>
+    <p>${t('clear.text', { n: HISTORY.length })}</p>
+    <div class="nav"><button class="btn" id="modalCancel">${t('clear.cancel')}</button><span class="spacer"></span><button class="btn primary danger" id="modalClear">${t('clear.confirm')}</button></div>
   </div></div>`;
-  const noun = state.session.mode === 'exam' ? 'Prüfung' : 'Übung';
+  const noun = nounOf(state.session);
   return `<div class="modal" id="modal"><div class="card">
-    <h2>${noun} wirklich abgeben?</h2>
-    <p>Du hast noch <strong>${state.modal.open}</strong> ${state.modal.open === 1 ? 'Frage' : 'Fragen'} nicht beantwortet. Unbeantwortete Fragen zählen als falsch.</p>
-    <div class="nav"><button class="btn" id="modalCancel">Weiter bearbeiten</button><span class="spacer"></span><button class="btn primary" id="modalOk">Jetzt abgeben</button></div>
+    <h2>${t('finish.title', { noun })}</h2>
+    <p>${t('finish.text', { n: state.modal.open })}</p>
+    <div class="nav"><button class="btn" id="modalCancel">${t('leave.keep')}</button><span class="spacer"></span><button class="btn primary" id="modalOk">${t('finish.confirm')}</button></div>
   </div></div>`;
 }
 
@@ -1069,7 +1102,7 @@ const runPct = run => Math.round(run.score / run.total * 100);
 const runPassed = run => run.score >= passMark(run.total);
 
 function progressChart(runs){
-  if(runs.length < 2) return `<p class="time-note">Das Diagramm erscheint ab zwei Durchläufen.</p>`;
+  if(runs.length < 2) return `<p class="time-note">${t('chart.needTwo')}</p>`;
   // Breite an den verfügbaren Platz anpassen, damit die Beschriftung auf dem Handy lesbar bleibt (1:1 statt verkleinert)
   const W = Math.max(300, Math.min(900, (app.clientWidth || 680) - 40)), H = 230, L = 40, R = 14, T = 14, B = 30;
   const x = i => L + i / (runs.length - 1) * (W - L - R);
@@ -1078,44 +1111,44 @@ function progressChart(runs){
   const pts = runs.map((r, i) => `${x(i).toFixed(1)},${y(runPct(r)).toFixed(1)}`).join(' ');
   const step = Math.ceil(runs.length / 10);
   const xl = runs.map((r, i) => (i % step === 0 || i === runs.length - 1) ? `<text x="${x(i)}" y="${H - 10}" text-anchor="middle" class="axis">${i + 1}</text>` : '').join('');
-  const dots = runs.map((r, i) => `<circle cx="${x(i)}" cy="${y(runPct(r))}" r="5" class="${runPassed(r) ? 'dot-ok' : 'dot-bad'}"><title>${fmtDate(r.date)} · ${esc(r.title)} · ${r.score}/${r.total} (${runPct(r)} %)</title></circle>`).join('');
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Ergebnis in Prozent je Durchlauf">
+  const dots = runs.map((r, i) => `<circle cx="${x(i)}" cy="${y(runPct(r))}" r="5" class="${runPassed(r) ? 'dot-ok' : 'dot-bad'}"><title>${fmtDate(r.date)} · ${esc(sessionTitle(r))} · ${r.score}/${r.total} (${runPct(r)} %)</title></circle>`).join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(t('chart.aria'))}">
     ${grid}
     <line x1="${L}" x2="${W - R}" y1="${y(PASS_PCT)}" y2="${y(PASS_PCT)}" class="passline"/>
     <polyline points="${pts}" class="line"/>${dots}${xl}
   </svg>
   <div class="legend chart-legend">
-    <span><i class="lg-pass"></i> Bestehensgrenze ${PASS_PCT} %</span>
-    <span><i style="background:var(--ok);border-color:var(--ok);border-radius:999px"></i> bestanden</span>
-    <span><i style="background:var(--bad);border-color:var(--bad);border-radius:999px"></i> nicht bestanden</span>
-    <span>Waagerecht: Durchläufe in zeitlicher Reihenfolge</span>
+    <span><i class="lg-pass"></i> ${t('pass.limit', { pct: PASS_PCT })}</span>
+    <span><i style="background:var(--ok);border-color:var(--ok);border-radius:999px"></i> ${t('run.passed')}</span>
+    <span><i style="background:var(--bad);border-color:var(--bad);border-radius:999px"></i> ${t('run.failed')}</span>
+    <span>${t('chart.horizontal')}</span>
   </div>`;
 }
 
 /* Kleines „?“ mit Erklärung: erscheint beim Darüberfahren/Fokus (CSS) und beim Antippen (Klasse .open, siehe bind) */
-const tip = (id, label, text) => `<span class="tip"><button type="button" class="tip-btn" aria-label="Erklärung: ${esc(label)}" aria-expanded="false" aria-describedby="${id}" data-tip>?</button><span class="tip-text" role="tooltip" id="${id}">${esc(text)}</span></span>`;
+const tip = (id, label, text) => `<span class="tip"><button type="button" class="tip-btn" aria-label="${esc(t('tip.aria', { label }))}" aria-expanded="false" aria-describedby="${id}" data-tip>?</button><span class="tip-text" role="tooltip" id="${id}">${esc(text)}</span></span>`;
 
 function viewProgress(){
   const notice = state.notice; state.notice = null;
   const backup = `<div class="card backup">
-      <h2>Datensicherung</h2>
-      <p class="time-note">Verlauf, Einstellungen und ein unterbrochener Durchlauf liegen nur in diesem Browser auf diesem Gerät. Lade eine Sicherung herunter (z. B. nach iCloud, Google Drive oder OneDrive), um sie gegen gelöschte Browserdaten zu schützen oder auf ein anderes Gerät mitzunehmen. Beim Laden werden Verläufe zusammengeführt, die Einstellungen übernommen und ein unterbrochener Durchlauf zum Fortsetzen angeboten.<br>
-        ${lastBackup() ? `Letzte Sicherung: ${fmtDate(lastBackup())}` : 'Noch keine Sicherung erstellt.'}</p>
+      <h2>${t('backup.h')}</h2>
+      <p class="time-note">${t('backup.text')}<br>
+        ${lastBackup() ? t('backup.last', { date: fmtDate(lastBackup()) }) : t('backup.none')}</p>
       <div class="nav">
-        <button class="btn" data-backup>⤓ Sicherung herunterladen</button>
-        <button class="btn" id="importBtn">⤒ Sicherung laden</button>
+        <button class="btn" data-backup>${t('backup.download')}</button>
+        <button class="btn" id="importBtn">${t('backup.load')}</button>
         <input type="file" id="importFile" accept="application/json,.json" hidden>
         <span class="spacer"></span>
-        <button class="btn danger" id="clearBtn" ${HISTORY.length ? '' : 'disabled'}>Verlauf löschen</button>
+        <button class="btn danger" id="clearBtn" ${HISTORY.length ? '' : 'disabled'}>${t('clear.confirm')}</button>
       </div>
     </div>`;
-  const head = `<div class="eyebrow">Lernfortschritt</div><h1>Dein Lernfortschritt</h1>
+  const head = `<div class="eyebrow">${t('nav.progress')}</div><h1>${t('prog.h1')}</h1>
     ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}`;
   if(!HISTORY.length) return `${head}
     <div class="card empty">
-      <h2>Noch keine Durchläufe gespeichert</h2>
-      <p class="lead">Starte eine Prüfung oder ein Training. Jeder abgegebene Durchlauf erscheint hier mit Ergebnis, Dauer und allen Antworten – und lässt sich jederzeit erneut ansehen oder als Bericht herunterladen.</p>
-      <button class="btn primary" id="homeBtn">Zur Startseite</button>
+      <h2>${t('prog.emptyTitle')}</h2>
+      <p class="lead">${t('prog.emptyText')}</p>
+      <button class="btn primary" id="homeBtn">${t('nav.home')}</button>
     </div>${backup}`;
 
   const runs = [...HISTORY].sort(byDate).filter(r =>
@@ -1142,49 +1175,47 @@ function viewProgress(){
   const hard = Object.entries(stat).filter(([, v]) => v.wrong > 0)
     .sort((a, b) => b[1].wrong - a[1].wrong || b[1].wrong / b[1].n - a[1].wrong / a[1].n).slice(0, 10);
 
-  const seg = (name, val, opts) => `<div class="seg small" role="radiogroup">${opts.map(([v, t]) =>
-    `<label class="seg-opt"><input type="radio" name="${name}" value="${v}" data-pfilter ${val === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div>`;
+  const seg = (name, val, opts) => `<div class="seg small" role="radiogroup">${opts.map(([v, label]) =>
+    `<label class="seg-opt"><input type="radio" name="${name}" value="${v}" data-pfilter ${val === v ? 'checked' : ''}><span>${label}</span></label>`).join('')}</div>`;
 
   return `${head}
   <div class="filters">
-    ${seg('pmode', progressFilter.pmode, [['all', 'Alle'], ['exam', 'Reale Prüfung'], ['training', 'Training']])}
-    ${seg('psim', progressFilter.psim, [['all', 'Mit und ohne Simulation'], ['sim', 'Nur Simulation']])}
+    ${seg('pmode', progressFilter.pmode, [['all', t('pf.all')], ['exam', t('mode.exam')], ['training', t('mode.training')]])}
+    ${seg('psim', progressFilter.psim, [['all', t('pf.simAll')], ['sim', t('pf.simOnly')]])}
   </div>
   <div class="facts five">
-    <div class="fact"><b>${runs.length}</b><span>${runs.length === 1 ? 'Durchlauf' : 'Durchläufe'}</span></div>
-    <div class="fact"><b>${runs.length ? `Ø ${avg} %` : '–'}</b><span>(Prüfungswertung)${tip('tipExam', 'Prüfungswertung',
-      `Durchschnitt der Ergebnisse aller angezeigten Durchläufe. Unbeantwortete Fragen zählen als falsch – wie in der echten Prüfung. Danach richtet sich auch „bestanden“.`)}</span></div>
-    <div class="fact"><b>${answeredAll.length ? `Ø ${Math.round(answeredOk / answeredAll.length * 100)} %` : '–'}</b><span>(Trainingswertung)${tip('tipTrain', 'Trainingswertung',
-      `Anteil richtiger Antworten an allen beantworteten Fragen: ${answeredOk} von ${answeredAll.length}. Unbeantwortete Fragen bleiben außen vor – das zeigt den reinen Wissensstand, unabhängig von der Zeit.`)}</span></div>
-    <div class="fact"><b>${passedN} / ${runs.length}</b><span>bestanden</span></div>
-    <div class="fact"><b>${seen.size} / ${CATALOG.length}</b><span>Katalogfragen bearbeitet</span></div>
+    <div class="fact"><b>${runs.length}</b><span>${t(runs.length === 1 ? 'fact.run' : 'fact.runs')}</span></div>
+    <div class="fact"><b>${runs.length ? `Ø ${avg} %` : '–'}</b><span>${t('fact.examScore')}${tip('tipExam', t('fact.examScoreLabel'), t('fact.examScoreTip'))}</span></div>
+    <div class="fact"><b>${answeredAll.length ? `Ø ${Math.round(answeredOk / answeredAll.length * 100)} %` : '–'}</b><span>${t('fact.trainScore')}${tip('tipTrain', t('fact.trainScoreLabel'), t('fact.trainScoreTip', { ok: answeredOk, total: answeredAll.length }))}</span></div>
+    <div class="fact"><b>${passedN} / ${runs.length}</b><span>${t('run.passed')}</span></div>
+    <div class="fact"><b>${seen.size} / ${CATALOG.length}</b><span>${t('fact.seen')}</span></div>
   </div>
 
-  <h2 class="section-title">Ergebnis je Durchlauf</h2>
-  ${runs.length ? progressChart(runs) : '<p class="time-note">Keine Durchläufe für diesen Filter.</p>'}
+  <h2 class="section-title">${t('prog.h.perRun')}</h2>
+  ${runs.length ? progressChart(runs) : `<p class="time-note">${t('prog.noRuns')}</p>`}
 
   <div class="card errcard">
-    <div><b>${errN} Fehlerfrage${errN === 1 ? '' : 'n'} · ${flagN} markierte Frage${flagN === 1 ? '' : 'n'}</b><span>Fehlerfragen: zuletzt falsch beantwortet (offen gelassene zählen nicht). Markiert: beim letzten Vorkommen markiert.</span></div>
-    <span class="run-actions"><button class="btn primary" data-train="errors" ${errN ? '' : 'disabled'}>Fehlertraining</button><button class="btn" data-train="flagged" ${flagN ? '' : 'disabled'}>Markierte üben</button></span>
+    <div><b>${t('prog.errCount', { n: errN })} · ${t('prog.flagCount', { n: flagN })}</b><span>${t('prog.errText')}</span></div>
+    <span class="run-actions"><button class="btn primary" data-train="errors" ${errN ? '' : 'disabled'}>${t('prog.trainErrors')}</button><button class="btn" data-train="flagged" ${flagN ? '' : 'disabled'}>${t('prog.trainFlagged')}</button></span>
   </div>
 
-  <h2 class="section-title">Alle Durchläufe (${runs.length})</h2>
+  <h2 class="section-title">${t('prog.h.all', { n: runs.length })}</h2>
   <div class="runs">${[...runs].reverse().map(r => `
     <div class="run">
       <span class="n ${runPassed(r) ? 'ok' : 'bad'}">${runPct(r)}%</span>
-      <span class="run-main"><b>${esc(r.title)}</b>
-        <small>${fmtDate(r.date)} · ${r.score}/${r.total} richtig · ${runPassed(r) ? 'bestanden' : 'nicht bestanden'} · ${fmt(r.elapsed)} min${r.sim ? ' · Simulation' : ''}${r.timeout ? ' · Zeit abgelaufen' : ''}</small></span>
+      <span class="run-main"><b>${esc(sessionTitle(r))}</b>
+        <small>${t('run.line', { date: fmtDate(r.date), score: r.score, total: r.total, verdict: t(runPassed(r) ? 'run.passed' : 'run.failed'), time: fmt(r.elapsed) })}${r.sim ? t('run.sim') : ''}${r.timeout ? t('run.timeout') : ''}</small></span>
       ${r.items.some(x => BY_ID[x.id])
-        ? `<span class="run-actions"><button class="btn" data-run="${esc(r.id)}">Ansehen</button><button class="btn" data-run-report="${esc(r.id)}" aria-label="Bericht herunterladen">⤓ Bericht</button></span>`
-        : `<small class="run-actions">Fragen nicht mehr im Katalog<br>(ersetzte Fassung)</small>`}
+        ? `<span class="run-actions"><button class="btn" data-run="${esc(r.id)}">${t('run.view')}</button><button class="btn" data-run-report="${esc(r.id)}" aria-label="${esc(t('run.reportAria'))}">${t('run.report')}</button></span>`
+        : `<small class="run-actions">${t('run.gone')}</small>`}
     </div>`).join('')}</div>
 
-  ${Object.keys(topics).length ? `<h2 class="section-title">Ergebnis nach Themenbereich</h2>
-  <div class="topic-list">${Object.entries(topics).sort((a, b) => a[1].c / a[1].n - b[1].c / b[1].n).map(([t, v]) => `<div class="topic-row"><span>${esc(t)} <span style="color:var(--text-muted)">(${v.c}/${v.n})</span></span><div class="bar"><i style="width:${v.c / v.n * 100}%"></i></div><span class="pct">${Math.round(v.c / v.n * 100)} %</span></div>`).join('')}</div>
-  <p class="time-note">Sortiert vom schwächsten zum stärksten Bereich. Fragen ohne Themenzuordnung sind nicht enthalten.</p>` : ''}
+  ${Object.keys(topics).length ? `<h2 class="section-title">${t('topics.result')}</h2>
+  <div class="topic-list">${Object.entries(topics).sort((a, b) => a[1].c / a[1].n - b[1].c / b[1].n).map(([tp, v]) => `<div class="topic-row"><span>${esc(topicLabel(tp))} <span style="color:var(--text-muted)">(${v.c}/${v.n})</span></span><div class="bar"><i style="width:${v.c / v.n * 100}%"></i></div><span class="pct">${Math.round(v.c / v.n * 100)} %</span></div>`).join('')}</div>
+  <p class="time-note">${t('prog.topicNote')}</p>` : ''}
 
-  ${hard.length ? `<h2 class="section-title">Am häufigsten falsch</h2>
-  <div class="review">${hard.map(([id, v]) => { const q = BY_ID[id]; return `<div class="rv static"><span class="n bad">${v.wrong}×</span><span>${esc(qLabel(q))}<small>${v.wrong} von ${v.n} Mal falsch beantwortet · ${id} · ${esc(q.origin.join(', '))}</small></span></div>`; }).join('')}</div>` : ''}
+  ${hard.length ? `<h2 class="section-title">${t('prog.h.hard')}</h2>
+  <div class="review">${hard.map(([id, v]) => { const q = BY_ID[id]; return `<div class="rv static"><span class="n bad">${v.wrong}×</span><span>${esc(qLabel(q))}<small>${t('prog.hardLine', { wrong: v.wrong, n: v.n, id, origin: esc(q.origin.join(', ')) })}</small></span></div>`; }).join('')}</div>` : ''}
 
   ${backup}`;
 }
@@ -1210,7 +1241,7 @@ function saveBackup(){
   const data = backupData(), name = backupName(new Date(data.exported)), json = JSON.stringify(data, null, 1);
   const done = () => {
     try { localStorage.setItem(BACKUP_KEY, data.exported); } catch(e) {}
-    if(state.modal) state.modal.backedUp = true; else state.notice = 'Sicherung erstellt.';
+    if(state.modal) state.modal.backedUp = true; else state.notice = t('notice.backupDone');
     render();
   };
   // Teilen-Menü nur auf Touch-Geräten – am PC ist der Download erwartbarer
@@ -1243,27 +1274,27 @@ function loadBackup(file){
   file.text().then(text => {
     const data = JSON.parse(text);
     // Nur Dateien dieser App annehmen – sonst könnten Verläufe einer anderen Trainer-App (andere Fragen) hineingeraten
-    if(!Array.isArray(data) && data.app && data.app !== CFG.appId) throw new Error(`Datei stammt aus „${data.app}“, nicht aus dieser App`);
+    if(!Array.isArray(data) && data.app && data.app !== CFG.appId) throw new Error(t('import.errApp', { app: data.app }));
     const runs = Array.isArray(data) ? data : data.runs;
-    if(!Array.isArray(runs)) throw new Error('keine Durchläufe gefunden');
+    if(!Array.isArray(runs)) throw new Error(t('import.errNoRuns'));
     const valid = runs.map(cleanRun).filter(Boolean);
     const known = new Set(HISTORY.map(r => r.id));
     const fresh = valid.filter(r => !known.has(r.id));
     HISTORY = [...HISTORY, ...fresh];
     const ok = store.save(HISTORY);
-    const msg = [`${fresh.length} ${fresh.length === 1 ? 'Durchlauf' : 'Durchläufe'} übernommen${valid.length - fresh.length ? `, ${valid.length - fresh.length} ${valid.length - fresh.length === 1 ? 'war' : 'waren'} schon vorhanden` : ''}${runs.length - valid.length ? `, ${runs.length - valid.length} ungültig übersprungen` : ''}.`];
+    const msg = [t('import.taken', { n: fresh.length }) + (valid.length - fresh.length ? t('import.existing', { n: valid.length - fresh.length }) : '') + (runs.length - valid.length ? t('import.invalid', { n: runs.length - valid.length }) : '') + '.'];
     // Einstellungen übernehmen (Entscheidung Felix 27.10.2026) – über loadSettings, damit ungültige Werte abgefangen werden
     if(data.settings && typeof data.settings === 'object'){
       try { localStorage.setItem(CFG.storagePrefix + 'settings', JSON.stringify(data.settings)); } catch(e) {}
-      Object.assign(settings, loadSettings()); saveSettings(); msg.push('Einstellungen übernommen.');
+      Object.assign(settings, loadSettings()); saveSettings(); msg.push(t('import.settings'));
     }
     const cur = checkCurrent(data.current);
     if(cur){
       const local = loadCurrent();
       restore = local && local.savedAt !== cur.savedAt ? { type: 'choose', fromFile: cur, local } : { type: 'restore', saved: cur, fromFile: true };
-    } else if(data.current) msg.push('Der unterbrochene Durchlauf passt nicht mehr zum Fragenkatalog und wurde nicht übernommen.');
-    state.notice = msg.join(' ') + (ok ? '' : ' Achtung: Speichern im Browser nicht möglich.');
-  }).catch(err => { state.notice = `Laden fehlgeschlagen: Die Datei ist keine gültige Sicherung dieser App (${err.message}).`; })
+    } else if(data.current) msg.push(t('import.staleCurrent'));
+    state.notice = msg.join(' ') + (ok ? '' : t('import.saveFail'));
+  }).catch(err => { state.notice = t('import.failed', { msg: err.message }); })
     .finally(() => { state.modal = restore; render(); });
 }
 /* Unterbrochenen Durchlauf übernehmen: in den Browser-Speicher schreiben, dann wie nach dem Neuladen fortsetzen */
@@ -1316,7 +1347,7 @@ function bind(){
   $('modalPickFile') && ($('modalPickFile').onclick = () => adoptCurrent(state.modal.fromFile));
   $('modalPickLocal') && ($('modalPickLocal').onclick = () => adoptCurrent(state.modal.local));
   $('clearBtn') && ($('clearBtn').onclick = () => { state.modal = { type: 'clear' }; render(); });
-  $('modalClear') && ($('modalClear').onclick = () => { HISTORY = []; store.save(HISTORY); state.modal = null; state.notice = 'Verlauf gelöscht.'; render(); });
+  $('modalClear') && ($('modalClear').onclick = () => { HISTORY = []; store.save(HISTORY); state.modal = null; state.notice = t('notice.cleared'); render(); });
   $('startBtn') && ($('startBtn').onclick = start);
   document.querySelectorAll('[data-choose]').forEach(b => b.onclick = () => choose(b.dataset.choose));
   document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => go(state.pos + Number(b.dataset.nav)));
@@ -1363,12 +1394,21 @@ document.addEventListener('keydown', e => {
   else if(e.key === 'ArrowLeft') go(state.pos - 1);
 });
 
-document.title = CFG.appTitle;
+document.title = appName();
 /* Kopfzeile: Logo + „Startseite“ = Home; Links zu verwandten Apps (neuer Tab, damit ein laufender Durchlauf erhalten bleibt) */
 const EXT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
-document.getElementById('appLinks').innerHTML = (CFG.otherApps || []).map(a =>
-  `<a class="app-link" href="${esc(a.url)}" target="_blank" rel="noopener" title="${esc(a.title || a.label)}" aria-label="${esc(a.label)} (öffnet in neuem Tab)"><span class="brand-word">${esc(a.label)}</span>${EXT_ICON}</a>`).join('');
+const appLinksHtml = () => (CFG.otherApps || []).map(a =>
+  `<a class="app-link" href="${esc(a.url)}" target="_blank" rel="noopener" title="${esc(a.title || a.label)}" aria-label="${esc(t('link.newTab', { label: a.label }))}"><span class="brand-word">${esc(a.label)}</span>${EXT_ICON}</a>`).join('');
+document.getElementById('appLinks').innerHTML = appLinksHtml();
 document.getElementById('brandWord').textContent = CFG.brandWord || '';
+/* Sprachwechsel (Knopf in i18n.js): alles neu zeichnen, ohne Zustand zu verlieren – laufende Prüfung, Auswahl, Zeit und Daten bleiben in
+   state/settings/HISTORY; gezeichnet wird nur die Anzeige. */
+onLangChange(() => {
+  document.title = appName();
+  document.getElementById('appLinks').innerHTML = appLinksHtml();
+  render(); renderScenario();
+  if(state.view === 'exam' && state.session && !timer.hidden) showTimer();
+});
 if(CFG.brandColor) document.documentElement.style.setProperty('--brand', CFG.brandColor);
 function goHome(force = false){
   // Während einer laufenden Prüfung/Übung erst nachfragen – der Durchlauf würde sonst verloren gehen

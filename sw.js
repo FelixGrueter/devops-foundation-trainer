@@ -3,7 +3,13 @@
    index.html bleibt maßgeblich); ohne Netz wird die zuletzt geladene Fassung aus dem Cache geliefert. Gecacht wird nur dieselbe Herkunft
    (kein Google Fonts/Fremdinhalt); data/inhalt.enc.json ist bereits verschlüsselt. Geltungsbereich = dieser Ordner, andere Apps der Domain bleiben unberührt. */
 const CACHE = 'dof-cache-v1';
-self.addEventListener('install', () => self.skipWaiting());
+/* Vorab zwischenspeichern (Rückfall offline): neben den ohnehin beim Laden gecachten Dateien auch die Sprachdatei i18n.js, damit schon
+   die Anmeldemaske offline zweisprachig bleibt. Best-Effort: ein Fehlschlag (z. B. kein Netz bei der Installation) verhindert die Installation nicht. */
+const PRECACHE = ['i18n.js'];
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => Promise.all(PRECACHE.map(f => c.add(f).catch(() => {})))).catch(() => {}));
+  self.skipWaiting();
+});
 self.addEventListener('activate', e => e.waitUntil(
   caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('dof-cache-') && k !== CACHE).map(k => caches.delete(k))))
     .then(() => self.clients.claim())));
