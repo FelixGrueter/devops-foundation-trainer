@@ -29,22 +29,25 @@ window.APP_CONFIG = {
       hint: 'Offizielle Mock-Prüfungsfragen mit Lösung und Begründung zu jeder Antwortoption samt Foliennummer (von einer KI aus den offiziellen Trainer-Folien erstellt).' },
     { code: 'MOB', title: 'Mock B', sub: 'Offizielle Mock-Prüfung', official: true, badge: 'mit Begründungen',
       hint: 'Offizielle Mock-Prüfungsfragen mit Lösung und Begründung zu jeder Antwortoption samt Foliennummer (von einer KI aus den offiziellen Trainer-Folien erstellt).' },
-    // Quiz 1/2 (früher „Leecon“): Quellenangabe wie die Mock-Prüfungen (Entscheidung Felix 18.11.2026)
-    { code: 'QUIZ1', title: 'Quiz 1', sub: 'Offizielle Mock-Prüfung', official: true, badge: 'mit Begründungen',
-      hint: 'Offizielle Mock-Prüfungsfragen mit Lösung und Begründung zu jeder Antwortoption samt Foliennummer (von einer KI aus den offiziellen Trainer-Folien erstellt).' },
-    { code: 'QUIZ2', title: 'Quiz 2', sub: 'Offizielle Mock-Prüfung', official: true, badge: 'mit Begründungen',
-      hint: 'Offizielle Mock-Prüfungsfragen mit Lösung und Begründung zu jeder Antwortoption samt Foliennummer (von einer KI aus den offiziellen Trainer-Folien erstellt).' },
+    // Quiz 1/2 (früher „Leecon“): Bezeichnung „Offizielle Test-Prüfung“ (Entscheidung Felix 18.11.2026, zuvor „Mock-Prüfung“ wie Mock A/B)
+    { code: 'QUIZ1', title: 'Quiz 1', sub: 'Offizielle Test-Prüfung', official: true, badge: 'mit Begründungen',
+      hint: 'Offizielle Test-Prüfungsfragen mit Lösung und Begründung zu jeder Antwortoption samt Foliennummer (von einer KI aus den offiziellen Trainer-Folien erstellt).' },
+    { code: 'QUIZ2', title: 'Quiz 2', sub: 'Offizielle Test-Prüfung', official: true, badge: 'mit Begründungen',
+      hint: 'Offizielle Test-Prüfungsfragen mit Lösung und Begründung zu jeder Antwortoption samt Foliennummer (von einer KI aus den offiziellen Trainer-Folien erstellt).' },
   ],
   countStep: 10,                                 // Schieberegler im Trainingsmodus: 10er-Schritte bis zur Katalogsgröße (rechts = „Alle“)
   passRate: 0.65,                                // 65 % → 26 von 40 (vorläufige Bestehensgrenze laut Syllabus v3.6.1)
   examInfo: '60 min für 40 Fragen',              // Text im Tooltip der Tempo-Leiste (Prüfungsregel in Worten)
   secondsPerQuestion: 60 * 60 / 40,              // echte Prüfung: 60 Minuten für 40 Fragen (Countdown bei Simulation); Open Book; nur 60 min (Entscheidung Felix 18.11.2026)
 
-  sourceNote: 'Fragen und Lösungen: DevOps Foundation®, Musterprüfung 1 und 2 (PeopleCert, offizielle Schulungsunterlagen); Mock A, Mock B, Quiz 1 und Quiz 2: offizielle Mock-Prüfungsfragen. Die Begründungen je Antwortoption (mit Foliennummer) und die Themenzuordnung wurden von einer KI aus den offiziellen Trainer-Folien (v3.6.1) erstellt. Prüfungsregeln nach dem offiziellen Syllabus v3.6.1.',
+  sourceNote: 'Fragen und Lösungen: DevOps Foundation®, Musterprüfung 1 und 2 (PeopleCert, offizielle Schulungsunterlagen); Mock A und Mock B: offizielle Mock-Prüfungsfragen; Quiz 1 und Quiz 2: offizielle Test-Prüfungsfragen. Die Begründungen je Antwortoption (mit Foliennummer) und die Themenzuordnung wurden von einer KI aus den offiziellen Trainer-Folien (v3.6.1) erstellt. Prüfungsregeln nach dem offiziellen Syllabus v3.6.1.',
   topicNote: 'Hinweis: Alle Fragen sind den acht offiziellen Themenbereichen zugeordnet. Musterprüfungen: laut offiziellem Antwortschlüssel; Mock A und B: laut Quelle; Quiz 1 und 2: durch eine KI nach den Trainer-Folien – dort eine Einschätzung, keine offizielle Zuordnung.',
   topicNoteShort: 'durch KI zugeordnet',            // hinter dem Themenbereich einer Frage (nur wenn keine Fundstelle vorhanden – bei DevOps immer vorhanden)
   trademark: 'DevOps Foundation® ist eine Marke von PeopleCert. Diese App ist ein unabhängiges Übungsangebot und steht in keiner Verbindung zu PeopleCert.',
   explHint: 'Mit Begründung zu jeder Antwortoption und Foliennummer der offiziellen Trainer-Folien (KI-erstellt).',
+  // Feedback: Teams-Direktlink (Entscheidung Felix 18.11.2026; die Adresse ist bewusst öffentlich, die Nutzer sind im selben Team)
+  feedbackTeams: 'felixpascal.grueter@gfn.education',
+  hint: 'Alle Inhalte sind ohne Gewähr. Begründungen und Themenzuordnungen wurden teils von einer KI erstellt und können Fehler enthalten. Fällt dir etwas Fragwürdiges auf (Frage, Lösung oder Begründung), gib mir bitte kurz Feedback.',
   refLabel: 'Fundstelle',                        // Bezeichnung der Referenz in der Frage (statt „Lehrplan“)
   refHint: '„Folie n“ = Seite der offiziellen Trainer-Folien (PDF v3.6.1)',
 };

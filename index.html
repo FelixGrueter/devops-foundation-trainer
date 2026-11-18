@@ -332,6 +332,8 @@ body.scen-open{padding-right:min(420px,38vw)}
 .fb-head.bad{background:var(--bad-soft);color:var(--bad-ink)}
 .fb-head svg{width:22px;height:22px;flex:none}
 .fb-body{padding:var(--space-5);background:var(--surface);display:grid;gap:var(--space-4)}
+.fb-title{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap}
+.fb-title .btn{text-decoration:none;color:var(--text)}
 .fb-body h3{font-size:var(--text-sm);font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted)}
 .expl{display:flex;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-radius:var(--radius-sm);background:var(--surface-2);font-size:var(--text-sm);line-height:1.55}
 .expl .letter{flex:none;width:26px;height:26px;border-radius:999px;display:grid;place-items:center;font-weight:700;font-size:var(--text-xs);background:var(--surface);border:1px solid var(--border)}
@@ -344,6 +346,12 @@ body.scen-open{padding-right:min(420px,38vw)}
 .expl p{color:var(--text)}
 .ref{font-size:var(--text-xs);color:var(--text-muted);display:flex;gap:var(--space-4);flex-wrap:wrap}
 .ref code{font-family:ui-monospace,Menlo,monospace;background:var(--surface-2);padding:1px 6px;border-radius:4px}
+.ref a,footer a{color:var(--accent-ink);text-decoration:underline;text-underline-offset:2px}
+.hint-banner{max-width:1100px;margin:calc(-1 * var(--space-4)) auto var(--space-6);padding:var(--space-3) var(--space-4);display:flex;gap:var(--space-3);align-items:flex-start;background:var(--accent-soft);color:var(--text);border:1px solid var(--border);border-radius:12px;font-size:var(--text-sm);line-height:1.5}
+.hint-banner p{flex:1;min-width:0}
+.hint-banner a{color:var(--accent-ink);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.hint-x{flex:none;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;color:var(--text-muted)}
+.hint-x:hover{background:var(--surface-2);color:var(--text)}
 .nav{display:flex;gap:var(--space-3);margin-top:var(--space-6);flex-wrap:wrap}
 .nav .spacer{flex:1}
 .nav.top{margin:0 0 var(--space-5);padding-bottom:var(--space-4);border-bottom:1px solid var(--border)}
@@ -693,12 +701,12 @@ header{background:color-mix(in srgb,var(--bg) 92%,transparent)}
 <main id="app" aria-live="polite"></main>
 <aside id="scenPanel" class="scen-panel" tabindex="-1" aria-label="Szenario" hidden></aside>
 
-<footer><span id="footSource"></span> <span id="footTrademark"></span> Diese interaktive Umsetzung dient ausschließlich dem persönlichen Lernen.</footer>
+<footer><span id="footSource"></span> <span id="footTrademark"></span> Diese interaktive Umsetzung dient ausschließlich dem persönlichen Lernen. <span id="footFeedback"></span></footer>
 
 <script>
 (() => {
   // Versionsparameter bei jeder Änderung an config.js bzw. app.js erhöhen: neue index.html lädt garantiert die passenden Dateien
-  const V = '?v=6', KEY = 'dof-unlock', LOCK = 'dof-gate', TRIES = 3, LOCK_MS = 24 * 3600 * 1000;
+  const V = '?v=9', KEY = 'dof-unlock', LOCK = 'dof-gate', TRIES = 3, LOCK_MS = 24 * 3600 * 1000;
   // Offline-Nutzung: Service Worker (sw.js) nur über http(s); Fehler sind unkritisch
   if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
   const $ = id => document.getElementById(id), form = $('gateForm'), err = $('gateErr'), btn = $('gateBtn');

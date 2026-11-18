@@ -12,6 +12,10 @@ const PASS_PCT = Math.round(PASS_RATE * 100);
 const SECONDS_PER_QUESTION = CFG.secondsPerQuestion;
 const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];   // angezeigte Buchstaben je Position; Fragen haben 4 (klassisch) bis 6 Optionen (Zuordnung)
 const SOURCE_NOTE = CFG.sourceNote;
+/* Feedback per Teams-Direktlink (config.feedbackTeams); Hinweis-Banner auf der Startseite ist wegklickbar, die Wahl wird gemerkt ({Präfix}hint) */
+const feedbackUrl = msg => CFG.feedbackTeams ? `https://teams.microsoft.com/l/chat/0/0?users=${encodeURI(CFG.feedbackTeams)}${msg ? '&message=' + encodeURIComponent(msg) : ''}` : '';
+const HINT_KEY = (CFG.storagePrefix || '') + 'hint';
+const hintDismissed = () => { try { return localStorage.getItem(HINT_KEY) === '1'; } catch(e) { return false; } };
 const minutesFor = n => Math.round(n * SECONDS_PER_QUESTION / 60);
 
 /* ---------- Einstellungen (pro Browser gemerkt) ---------- */
@@ -639,7 +643,7 @@ ${notOk.length ? notOk.map(({it, i}) => reportQuestion(s, it, i)).join('') : '<d
 <h2>Richtig beantwortet <small>${okRows.length} ${okRows.length === 1 ? 'Frage' : 'Fragen'} · zum Aufklappen</small></h2>
 ${okRows.length ? okRows.map(({it, i}) => reportQuestion(s, it, i)).join('') : '<div class="card empty">Noch keine.</div>'}
 ${SCENARIO ? `<h2>Anhang: ${esc(SCENARIO.title)}</h2><section class="card scen">${scenarioBody(SCENARIO)}<p class="meta">${esc(SCENARIO.source)}</p></section>` : ''}
-<footer class="foot"><b>Erstellt mit dem ${esc(CFG.appTitle)}</b>${CFG.liveUrl ? ` · ${esc(CFG.liveUrl)}` : ''}<br>${esc(SOURCE_NOTE)} ${esc(CFG.trademark || '')} Nur für das persönliche Lernen.</footer>
+<footer class="foot"><b>Erstellt mit dem ${esc(CFG.appTitle)}</b>${CFG.liveUrl ? ` · ${esc(CFG.liveUrl)}` : ''}<br>${esc(SOURCE_NOTE)} ${esc(CFG.trademark || '')} Nur für das persönliche Lernen. Alle Angaben ohne Gewähr.</footer>
 </body></html>`;
 }
 function downloadReport(s){ download(reportFileName(s), buildReport(s), 'text/html;charset=utf-8'); }
@@ -662,6 +666,7 @@ const ICON_HOME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 function updateChrome(){
   const s = state.session;
   footSource.textContent = SOURCE_NOTE; footTrademark.textContent = CFG.trademark || '';
+  footFeedback.innerHTML = `Alle Angaben ohne Gewähr.${feedbackUrl() ? ` <a href="${esc(feedbackUrl('Feedback zum ' + CFG.appTitle + ': '))}" target="_blank" rel="noopener">Feedback per Teams</a>.` : ''}`;
   // Während einer laufenden Bearbeitung kein Wechsel in den Lernfortschritt (sonst ginge die Sitzung verloren)
   progressBtn.hidden = state.view === 'exam' && !state.reviewMode;
   if(state.view !== 'exam' || state.reviewMode){ if(!state.reviewMode) stopTimer(); timer.hidden = true; }
@@ -765,6 +770,7 @@ function viewStart(){
   const blockNote = GROUPS && Object.keys(GROUPS).length ? ' Zuordnungsblöcke (3 Teilfragen mit gemeinsamer Optionsliste) werden immer vollständig gezogen; ihre Optionen bleiben in Originalreihenfolge.' : '';
 
   return `
+  ${CFG.hint && !hintDismissed() ? `<div class="hint-banner" role="note"><p>${esc(CFG.hint)}${feedbackUrl() ? ` <a href="${esc(feedbackUrl('Feedback zum ' + CFG.appTitle + ': '))}" target="_blank" rel="noopener">Feedback per Teams geben</a>` : ''}</p><button type="button" class="hint-x" data-hintx aria-label="Hinweis schließen"><span aria-hidden="true">✕</span></button></div>` : ''}
   <section class="hero">
     <div>
       <h1>Prüfungstrainer – üben wie in der echten Prüfung</h1>
@@ -872,7 +878,7 @@ function viewExam(){
              : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg><span>${chosen ? 'Leider falsch.' : 'Nicht beantwortet.'} Richtig ist <strong>${rightLabel(item)}</strong>.</span>`}
       </div>
       <div class="fb-body">
-        <h3>${withExpl || q.rationale ? 'Begründung' : 'Lösung'}</h3>
+        <div class="fb-title"><h3>${withExpl || q.rationale ? 'Begründung' : 'Lösung'}</h3>${feedbackUrl() ? `<a class="btn" href="${esc(feedbackUrl('Frage ' + q.id + ' (' + q.origin.join(', ') + '): '))}" target="_blank" rel="noopener">Fehler melden</a>` : ''}</div>
         ${body}
         <div class="ref">${q.ref ? `<span>${esc(CFG.refLabel ? CFG.refLabel + ':' : 'Lehrplan-Referenz:')} <code>${esc(q.ref)}</code></span><span>${esc(CFG.refHint)}</span>` : ''}${!q.ref && q.topic && CFG.topicNoteShort ? `<span>Themenbereich: ${esc(q.topic)} (${esc(CFG.topicNoteShort)})</span>` : ''}<span>Frage-ID: <code>${q.id}</code> · ${esc(q.origin.join(', '))}</span></div>
       </div>
@@ -1294,6 +1300,7 @@ function bind(){
   $c('topicAll', r => r.onchange = change(() => settings.trainingOpts.topics = [], 'input[name="topicAll"]'));
   $c('qsrcAll', r => r.onchange = change(() => settings.trainingOpts.exams = [], 'input[name="qsrcAll"]'));
   document.querySelectorAll('[data-ftoggle]').forEach(b => b.onclick = () => { state.filterOpen = !(b.getAttribute('aria-expanded') === 'true'); render(); document.querySelector('[data-ftoggle]').focus(); });
+  document.querySelectorAll('[data-hintx]').forEach(b => b.onclick = () => { try { localStorage.setItem(HINT_KEY, '1'); } catch(e) {} render(); });
   document.querySelectorAll('[data-freset]').forEach(b => b.onclick = () => { Object.assign(settings.trainingOpts, { source: 'all', topics: [], exams: [] }); saveSettings(); render(); document.querySelector('[data-ftoggle]').focus(); });
   document.querySelectorAll('input[name="source"]').forEach(r => r.onchange = change(() => settings.trainingOpts.source = r.value, `input[name="source"][value="${r.value}"]`));
   $('reportBtn') && ($('reportBtn').onclick = () => downloadReport(state.session));
