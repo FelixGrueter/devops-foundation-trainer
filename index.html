@@ -709,11 +709,11 @@ header{background:color-mix(in srgb,var(--bg) 92%,transparent)}
 <footer><span id="footSource"></span> <span id="footTrademark"></span> <span id="footLearn" data-i18n="foot.learn">Diese interaktive Umsetzung dient ausschließlich dem persönlichen Lernen.</span> <span id="footFeedback"></span></footer>
 
 <!-- Texte DE/EN (i18n.js): muss vor dem Anmelde-Skript laufen, weil schon die Anmeldemaske zweisprachig ist. Versionsparameter hier UND in V unten gemeinsam erhöhen. -->
-<script src="i18n.js?v=12"></script>
+<script src="i18n.js?v=13"></script>
 <script>
 (() => {
   // Versionsparameter bei jeder Änderung an config.js, app.js bzw. i18n.js erhöhen: neue index.html lädt garantiert die passenden Dateien
-  const V = '?v=12', KEY = 'dof-unlock', LOCK = 'dof-gate', TRIES = 3, LOCK_MS = 24 * 3600 * 1000;
+  const V = '?v=13', KEY = 'dof-unlock', LOCK = 'dof-gate', TRIES = 3, LOCK_MS = 24 * 3600 * 1000;
   // Offline-Nutzung: Service Worker (sw.js) nur über http(s); Fehler sind unkritisch
   if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
   const $ = id => document.getElementById(id), form = $('gateForm'), err = $('gateErr'), btn = $('gateBtn');
