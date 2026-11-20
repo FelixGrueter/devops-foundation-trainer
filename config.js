@@ -21,7 +21,7 @@ window.APP_CONFIG = {
   reportPrefix: 'DevOps-Foundation',              // Dateinamen von Bericht und Verlaufs-Export
 
   // Prüfungen: code = Präfix in katalog.json → origin (z. B. "SP1-19" = Musterprüfung 1, Frage 19)
-  // Alle sechs Prüfungen sind Einzelauswahl (A–D); Begründung je Option mit Foliennummer (KI-erstellt aus den Trainer-Folien, Stand 18.11.2026).
+  // Alle vier Prüfungen sind Einzelauswahl (A–D); Begründung je Option mit Foliennummer (KI-erstellt aus den Trainer-Folien, Stand 18.11.2026).
   exams: [
     { code: 'SP1', title: 'exam.SP1.title', sub: 'exam.SP1.sub', official: true, badge: 'exam.badgeExpl',
       hint: 'exam.hint.sample' },
@@ -31,11 +31,6 @@ window.APP_CONFIG = {
       hint: 'exam.hint.mock' },
     { code: 'MOB', title: 'exam.MOB.title', sub: 'exam.MOB.sub', official: true, badge: 'exam.badgeExpl',
       hint: 'exam.hint.mock' },
-    // Quiz 1/2 (früher „Leecon“): Bezeichnung „Offizielle Test-Prüfung“ (Entscheidung Felix 18.11.2026, zuvor „Mock-Prüfung“ wie Mock A/B)
-    { code: 'QUIZ1', title: 'exam.QUIZ1.title', sub: 'exam.QUIZ1.sub', official: true, badge: 'exam.badgeExpl',
-      hint: 'exam.hint.test' },
-    { code: 'QUIZ2', title: 'exam.QUIZ2.title', sub: 'exam.QUIZ2.sub', official: true, badge: 'exam.badgeExpl',
-      hint: 'exam.hint.test' },
   ],
   countStep: 10,                                 // Schieberegler im Trainingsmodus: 10er-Schritte bis zur Katalogsgröße (rechts = „Alle“)
   passRate: 0.65,                                // 65 % → 26 von 40 (vorläufige Bestehensgrenze laut Syllabus v3.6.1)
